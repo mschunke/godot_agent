@@ -9,20 +9,6 @@ const ToolSchemas := preload("res://addons/godot_agent/tools/tool_schemas.gd")
 const ToolRegistry := preload("res://addons/godot_agent/tools/tool_registry.gd")
 const ProviderFactory := preload("res://addons/godot_agent/providers/provider_factory.gd")
 
-const SYSTEM_PROMPT := """You are an AI programming assistant embedded in the Godot 4 editor, running inside the user's project.
-Your job is to help the user plan, code, debug, and generate assets for their game.
-
-You have access to tools that let you inspect and modify the project directly. Prefer tools over asking the user. When you plan a change, first inspect the relevant files or scene tree, then act. Save scenes after editing them.
-
-Guidelines:
-- Before writing code that touches an unfamiliar Godot class, call get_class_docs to confirm the real API.
-- When creating new nodes, verify the class exists via get_class_docs first if you're unsure.
-- Prefer patch_script over rewriting a whole file with write_file / create_script.
-- When generating images with generate_image, save them under res://assets/ using descriptive filenames.
-- Be concise in explanations; show diffs or paths rather than dumping full files back to the user.
-- If a tool returns an error, read it and adjust — don't retry the same input verbatim.
-"""
-
 signal message_appended(role: String, text: String)
 signal tool_started(name: String, input: Dictionary)
 signal tool_finished(name: String, result: Dictionary)
@@ -40,7 +26,7 @@ var _busy: bool = false
 func _init(parent: Node) -> void:
 	parent_node = parent
 	conversation = Conversation.new()
-	conversation.set_system_prompt(SYSTEM_PROMPT)
+	conversation.set_system_prompt(Settings.system_prompt())
 	logger = AgentLogger.new()
 
 
@@ -63,6 +49,9 @@ func send_user_message(text: String) -> void:
 func _run_loop() -> void:
 	_busy = true
 	turn_started.emit()
+
+	# Pick up any system-prompt edits the user made since the last turn.
+	conversation.set_system_prompt(Settings.system_prompt())
 
 	var provider_name := Settings.provider()
 	var provider = ProviderFactory.create(provider_name)
@@ -132,4 +121,4 @@ func reset() -> void:
 	if _busy:
 		return
 	conversation.clear()
-	conversation.set_system_prompt(SYSTEM_PROMPT)
+	conversation.set_system_prompt(Settings.system_prompt())

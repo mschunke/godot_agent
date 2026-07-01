@@ -10,6 +10,7 @@ var _models: Dictionary = {}     # provider -> LineEdit
 var _image_provider_menu: OptionButton
 var _max_turns_edit: SpinBox
 var _confirm_toggle: CheckBox
+var _system_prompt_edit: TextEdit
 
 
 func _init() -> void:
@@ -106,6 +107,37 @@ func _build_ui() -> void:
 	_confirm_toggle.toggled.connect(func(v: bool) -> void: Settings.set_confirm_destructive(v))
 	content.add_child(_confirm_toggle)
 
+	content.add_child(HSeparator.new())
+
+	# ---- system prompt ----
+	var sp_header_row := HBoxContainer.new()
+	sp_header_row.add_theme_constant_override("separation", 8)
+	var sp_label := Label.new()
+	sp_label.text = "System prompt"
+	sp_label.add_theme_font_size_override("font_size", 14)
+	sp_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sp_header_row.add_child(sp_label)
+
+	var sp_reset_btn := Button.new()
+	sp_reset_btn.text = "Reset to default"
+	sp_reset_btn.pressed.connect(_on_reset_system_prompt)
+	sp_header_row.add_child(sp_reset_btn)
+	content.add_child(sp_header_row)
+
+	var sp_hint := Label.new()
+	sp_hint.text = "Sent to the model at the start of every turn. Edits apply to the next message you send — no need to start a new chat."
+	sp_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sp_hint.add_theme_color_override("font_color", Color(0.65, 0.65, 0.7))
+	content.add_child(sp_hint)
+
+	_system_prompt_edit = TextEdit.new()
+	_system_prompt_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_system_prompt_edit.custom_minimum_size = Vector2(0, 160)
+	_system_prompt_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	_system_prompt_edit.text = Settings.system_prompt()
+	_system_prompt_edit.text_changed.connect(func() -> void: Settings.set_system_prompt(_system_prompt_edit.text))
+	content.add_child(_system_prompt_edit)
+
 	# ---- close row (stays visible outside the scroll area) ----
 	var btn_row := HBoxContainer.new()
 	btn_row.alignment = BoxContainer.ALIGNMENT_END
@@ -182,3 +214,9 @@ func _default_model_placeholder(provider: String) -> String:
 func _on_close() -> void:
 	closed.emit()
 	hide()
+
+
+func _on_reset_system_prompt() -> void:
+	Settings.set_system_prompt(Settings.DEFAULT_SYSTEM_PROMPT)
+	if is_instance_valid(_system_prompt_edit):
+		_system_prompt_edit.text = Settings.DEFAULT_SYSTEM_PROMPT

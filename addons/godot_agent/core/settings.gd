@@ -22,10 +22,13 @@ const K_MODEL_OPENAI := PREFIX + "models/openai"
 const K_MODEL_GEMINI := PREFIX + "models/gemini"
 
 const K_IMAGE_PROVIDER := PREFIX + "image_provider"
+const K_SYSTEM_PROMPT := PREFIX + "system_prompt"
 
 const DEFAULT_MODEL_ANTHROPIC := "claude-sonnet-4-5-20250929"
 const DEFAULT_MODEL_OPENAI := "gpt-5"
 const DEFAULT_MODEL_GEMINI := "gemini-2.5-pro"
+
+const DEFAULT_SYSTEM_PROMPT := "You're an experienced Godot game designer and software engineer. Complete the requested tasks in the current Godot project. When executing a task, make sure to ask clarifications if required, then create a plan to execute the task, execute, and, if possible, try to test and debug without user intervention."
 
 const PROVIDERS := ["anthropic", "openai", "gemini"]
 
@@ -120,6 +123,14 @@ static func image_provider() -> String:
 
 static func set_image_provider(value: String) -> void:
 	_write(K_IMAGE_PROVIDER, value)
+
+
+static func system_prompt() -> String:
+	return String(_read(K_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT))
+
+
+static func set_system_prompt(value: String) -> void:
+	_write(K_SYSTEM_PROMPT, value)
 
 
 static func resolve_image_provider() -> String:
