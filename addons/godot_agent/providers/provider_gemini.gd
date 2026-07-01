@@ -73,16 +73,8 @@ func _send(parent: Node, url: String, headers: PackedStringArray, body: Dictiona
 	var canonical_content: Array = []
 	var call_counter := 0
 	for p in parts:
-		# Thought summary parts carry a `thoughtSignature` that the API requires
-		# to be echoed back on subsequent turns. They may or may not include a
-		# visible `text` field. Preserve them verbatim as a "thought" block so
-		# _convert_messages can round-trip them exactly.
-		if p.get("thought", false) or p.has("thoughtSignature"):
-			canonical_content.append({
-				"type": "thought",
-				"_gemini_native": p,
-			})
-			continue
+		# functionCall first: a functionCall part may itself carry a
+		# `thoughtSignature`, and we must still dispatch it as a tool call.
 		if p.has("functionCall"):
 			var fc: Dictionary = p.functionCall
 			# Gemini doesn't emit call IDs; synthesize one so tool_result matching works.
@@ -96,9 +88,22 @@ func _send(parent: Node, url: String, headers: PackedStringArray, body: Dictiona
 				"id": id_str,
 				"name": fc.name,
 				"input": input_dict,
-				"_gemini_native": fc,  # kept so _convert_messages can round-trip it (incl. thoughtSignature)
+				# Store the whole part so `thoughtSignature` (a sibling of
+				# functionCall on newer thinking models) round-trips too.
+				"_gemini_native_part": p,
 			})
-		elif p.has("text"):
+			continue
+		# Standalone thought summary parts (no functionCall). May or may not have
+		# a visible `text` field. Preserve them verbatim as a "thought" block so
+		# _convert_messages can round-trip them exactly and Gemini's next request
+		# passes signature validation.
+		if p.get("thought", false) or p.has("thoughtSignature"):
+			canonical_content.append({
+				"type": "thought",
+				"_gemini_native": p,
+			})
+			continue
+		if p.has("text"):
 			text += String(p.text)
 			canonical_content.append({"type": "text", "text": String(p.text)})
 
@@ -165,11 +170,16 @@ func _convert_messages(messages: Array) -> Array:
 							parts.append(t_native)
 					elif block.type == "tool_use":
 						name_by_id[block.id] = block.name
-						# Newer Gemini "thinking" models emit a `thoughtSignature`
-						# on each functionCall part and reject follow-up requests
-						# whose echoed functionCall omits it. Prefer the native
-						# fc dict we stashed on parse so the signature (and any
-						# future fields) survive the round-trip.
+						# Prefer the raw response part when we have it — it may
+						# include a sibling `thoughtSignature` alongside the
+						# functionCall which newer thinking models require to be
+						# echoed back verbatim on subsequent turns.
+						var native_part: Variant = block.get("_gemini_native_part", null)
+						if typeof(native_part) == TYPE_DICTIONARY:
+							parts.append(native_part)
+							continue
+						# Backwards compatibility with older stored conversations
+						# that only kept the inner functionCall dict.
 						var native: Variant = block.get("_gemini_native", null)
 						if typeof(native) == TYPE_DICTIONARY:
 							parts.append({"functionCall": native})

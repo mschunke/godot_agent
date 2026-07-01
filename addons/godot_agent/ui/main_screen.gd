@@ -13,11 +13,15 @@ var _messages_container: VBoxContainer
 var _messages_scroll: ScrollContainer
 var _input: TextEdit
 var _send_button: Button
+var _retry_button: Button
 var _status_label: Label
+var _status_dot: Panel
+var _status_dot_style: StyleBoxFlat
 var _provider_menu: OptionButton
 var _web_toggle: CheckBox
 var _settings_dialog: Window
 var _history_dialog: Window
+var _turn_produced_output: bool = false
 
 
 func _ready() -> void:
@@ -108,10 +112,26 @@ func _build_ui() -> void:
 	_messages_scroll.add_child(_messages_container)
 
 	# --- status ---
+	var status_row := HBoxContainer.new()
+	status_row.add_theme_constant_override("separation", 6)
+	root.add_child(status_row)
+
+	_status_dot = Panel.new()
+	_status_dot.custom_minimum_size = Vector2(10, 10)
+	_status_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_status_dot_style = StyleBoxFlat.new()
+	_status_dot_style.corner_radius_top_left = 5
+	_status_dot_style.corner_radius_top_right = 5
+	_status_dot_style.corner_radius_bottom_left = 5
+	_status_dot_style.corner_radius_bottom_right = 5
+	_status_dot.add_theme_stylebox_override("panel", _status_dot_style)
+	status_row.add_child(_status_dot)
+
 	_status_label = Label.new()
 	_status_label.text = ""
-	_status_label.add_theme_color_override("font_color", Color(0.65, 0.65, 0.7))
-	root.add_child(_status_label)
+	status_row.add_child(_status_label)
+
+	_set_status("idle", "Ready")
 
 	# --- input row ---
 	var input_row := HBoxContainer.new()
@@ -123,7 +143,18 @@ func _build_ui() -> void:
 	_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_input.custom_minimum_size = Vector2(0, 70)
 	_input.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	_input.gui_input.connect(_on_input_gui_input)
+	# Inline lambda instead of a named callback: named-method lookups on
+	# gui_input have been observed to intermittently fire "Method not found"
+	# after @tool hot-reloads (the signal fires against the previous script
+	# revision briefly). A lambda captures the current script state directly.
+	_input.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventKey and event.pressed:
+			# Ctrl+Enter (or Cmd+Enter on macOS) sends. Plain Enter keeps its
+			# default newline behaviour, which is what users expect in a
+			# multi-line prompt.
+			if event.keycode == KEY_ENTER and (event.ctrl_pressed or event.meta_pressed):
+				accept_event()
+				_on_send_pressed())
 	input_row.add_child(_input)
 
 	_send_button = Button.new()
@@ -132,6 +163,14 @@ func _build_ui() -> void:
 	_send_button.tooltip_text = "Ctrl/Cmd + Enter"
 	_send_button.pressed.connect(_on_send_pressed)
 	input_row.add_child(_send_button)
+
+	_retry_button = Button.new()
+	_retry_button.text = "Retry"
+	_retry_button.custom_minimum_size = Vector2(70, 0)
+	_retry_button.tooltip_text = "Re-run the model against the current conversation (available when the last turn produced nothing or after an error)."
+	_retry_button.disabled = true
+	_retry_button.pressed.connect(_on_retry_pressed)
+	input_row.add_child(_retry_button)
 
 
 func _refresh_provider_menu() -> void:
@@ -198,6 +237,7 @@ func _on_conversation_loaded() -> void:
 	else:
 		_replay_conversation(_agent.conversation)
 		_append_bubble("system", "Loaded chat: %s" % _agent.conversation.title)
+	_update_retry_button()
 
 
 func _clear_messages_ui() -> void:
@@ -245,16 +285,6 @@ func _on_reset() -> void:
 	_agent.reset()
 
 
-func _on_input_gui_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed:
-		# Ctrl+Enter (or Cmd+Enter on macOS) sends. Plain Enter keeps its default
-		# newline behaviour inside TextEdit, which is what users expect for a
-		# multi-line prompt.
-		if event.keycode == KEY_ENTER and (event.ctrl_pressed or event.meta_pressed):
-			accept_event()
-			_on_send_pressed()
-
-
 func _on_send_pressed() -> void:
 	var text := _input.text.strip_edges()
 	if text == "":
@@ -262,37 +292,78 @@ func _on_send_pressed() -> void:
 	if _agent.is_busy():
 		return
 	_input.text = ""
+	_retry_button.disabled = true
 	_agent.send_user_message(text)
 
 
 # ---------- agent signals ----------
 
 func _on_agent_message(role: String, text: String) -> void:
+	if role == "assistant" or role == "user":
+		_turn_produced_output = true
 	_append_bubble(role, text)
 
 
 func _on_tool_started(tool_name: String, input: Dictionary) -> void:
-	_status_label.text = "→ tool: %s(%s)" % [tool_name, JSON.stringify(input).left(160)]
+	_turn_produced_output = true
+	_set_status("processing", "→ tool: %s(%s)" % [tool_name, JSON.stringify(input).left(160)])
 
 
 func _on_tool_finished(tool_name: String, result: Dictionary) -> void:
 	var ok := bool(result.get("ok", true))
 	_append_tool_bubble(tool_name, ok, JSON.stringify(result))
-	_status_label.text = ""
+	_set_status("processing", "thinking...")
 
 
 func _on_turn_started() -> void:
-	_status_label.text = "thinking..."
+	_turn_produced_output = false
+	_set_status("processing", "thinking...")
 	_send_button.disabled = true
+	_retry_button.disabled = true
 
 
 func _on_turn_finished(reason: String) -> void:
-	_status_label.text = "done (%s)" % reason
+	if reason == "error":
+		# _on_error already set the error status; leave it.
+		pass
+	else:
+		_set_status("idle", "done (%s)" % reason)
 	_send_button.disabled = false
+	# If the model returned nothing visible and didn't call any tool, warn the
+	# user and offer an inline Retry — otherwise the chat looks stuck.
+	if reason != "error" and not _turn_produced_output:
+		_append_empty_turn_notice(reason)
+	_update_retry_button()
 
 
 func _on_error(msg: String) -> void:
+	var first_line := msg.get_slice("\n", 0)
+	if first_line.length() > 100:
+		first_line = first_line.substr(0, 97) + "..."
+	_set_status("error", "error: " + first_line)
 	_append_error_bubble(msg)
+	_update_retry_button()
+
+
+func _update_retry_button() -> void:
+	if _agent.is_busy():
+		_retry_button.disabled = true
+		return
+	# Retry is possible when the last recorded message is a user message (either
+	# the original prompt or a batch of tool_results waiting for a reply).
+	var msgs: Array = _agent.conversation.messages()
+	var can := not msgs.is_empty() and String(msgs[msgs.size() - 1].get("role", "")) == "user"
+	_retry_button.disabled = not can
+
+
+func _on_retry_pressed() -> void:
+	if _agent.is_busy():
+		return
+	_retry_button.disabled = true
+	var r: Dictionary = await _agent.retry_last()
+	if not r.get("ok", false):
+		_append_error_bubble("Retry failed: %s" % r.get("error", ""))
+	_update_retry_button()
 
 
 # ---------- bubble rendering ----------
@@ -373,6 +444,34 @@ func _append_error_bubble(msg: String) -> void:
 		var r: Dictionary = await _agent.retry_last()
 		if not r.get("ok", false):
 			_append_error_bubble("Retry failed: %s" % r.get("error", "")))
+	actions.add_child(retry_btn)
+
+	_messages_container.add_child(panel)
+	call_deferred("_scroll_to_bottom")
+
+
+func _append_empty_turn_notice(reason: String) -> void:
+	var panel := _make_bubble_panel("system")
+	var vb := _bubble_vbox(panel)
+	vb.add_child(_role_label("notice"))
+
+	var msg := "The model finished the turn (%s) without producing any visible text or tool call. This can happen with thinking models that emit only a thought summary. Click Retry to re-run the model against the current conversation." % reason
+	vb.add_child(_make_body_label(msg, false))
+
+	var actions := HBoxContainer.new()
+	actions.alignment = BoxContainer.ALIGNMENT_END
+	actions.add_theme_constant_override("separation", 6)
+	vb.add_child(actions)
+
+	var retry_btn := Button.new()
+	retry_btn.text = "Retry"
+	retry_btn.tooltip_text = "Re-run the model against the current conversation state"
+	retry_btn.pressed.connect(func() -> void:
+		retry_btn.disabled = true
+		var r: Dictionary = await _agent.retry_last()
+		if not r.get("ok", false):
+			_append_error_bubble("Retry failed: %s" % r.get("error", ""))
+		_update_retry_button())
 	actions.add_child(retry_btn)
 
 	_messages_container.add_child(panel)
@@ -485,3 +584,23 @@ func _scroll_to_bottom() -> void:
 		if not is_instance_valid(_messages_scroll):
 			return
 		_messages_scroll.scroll_vertical = int(sb.max_value)
+
+
+func _set_status(state: String, text: String) -> void:
+	var dot_color: Color
+	var text_color: Color
+	match state:
+		"processing":
+			dot_color = Color(0.36, 0.66, 0.98)   # blue
+			text_color = Color(0.75, 0.85, 0.98)
+		"error":
+			dot_color = Color(0.90, 0.30, 0.30)   # red
+			text_color = Color(0.98, 0.70, 0.70)
+		_:  # "idle" / anything else
+			dot_color = Color(0.40, 0.75, 0.45)   # green
+			text_color = Color(0.65, 0.65, 0.70)
+	if _status_dot_style:
+		_status_dot_style.bg_color = dot_color
+	if _status_label:
+		_status_label.text = text
+		_status_label.add_theme_color_override("font_color", text_color)

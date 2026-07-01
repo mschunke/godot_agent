@@ -258,7 +258,7 @@ func _on_fetch(provider: String, btn: Button) -> void:
 	btn.disabled = true
 	if status:
 		status.text = "Fetching..."
-	var pf := ProviderFactory.create(provider)
+	var pf: Variant = ProviderFactory.create(provider)
 	if pf == null:
 		if status:
 			status.text = "Unknown provider."
@@ -316,7 +316,7 @@ func _on_pick(provider: String, is_image: bool, anchor: Button) -> void:
 		menu.queue_free())
 	menu.close_requested.connect(func() -> void: menu.queue_free())
 
-	var rect := anchor.get_screen_rect()
+	var rect: Rect2 = anchor.get_screen_rect()
 	menu.position = Vector2i(rect.position.x, rect.position.y + int(rect.size.y))
 	menu.popup()
 
