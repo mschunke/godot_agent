@@ -1,0 +1,27 @@
+# Godot 4 defaults
+.godot/
+.import/
+export.cfg
+export_presets.cfg
+
+# Imported translations
+*.translation
+
+# Mono / .NET
+.mono/
+data_*/
+mono_crash.*.json
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Never commit API keys or agent logs
+addons/godot_agent/logs/
+addons/godot_agent/.secrets

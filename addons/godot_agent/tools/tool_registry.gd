@@ -1,0 +1,53 @@
+@tool
+extends RefCounted
+class_name GodotAgentToolRegistry
+
+# Dispatches canonical tool names to their implementation.
+# Kept as a facade so providers only speak the canonical name/input schema.
+
+const ProjectTools := preload("res://addons/godot_agent/tools/project_tools.gd")
+const SceneTools := preload("res://addons/godot_agent/tools/scene_tools.gd")
+const ScriptTools := preload("res://addons/godot_agent/tools/script_tools.gd")
+const EditorTools := preload("res://addons/godot_agent/tools/editor_tools.gd")
+const ImageTools := preload("res://addons/godot_agent/tools/image_tools.gd")
+
+
+static func dispatch(parent: Node, name: String, input: Dictionary) -> Dictionary:
+	# `input` is JSON-parsed; ensure it's a Dictionary.
+	if typeof(input) != TYPE_DICTIONARY:
+		input = {}
+
+	match name:
+		# filesystem
+		"list_project_files": return ProjectTools.list_project_files(input)
+		"read_file": return ProjectTools.read_file(input)
+		"write_file": return ProjectTools.write_file(input)
+		"create_directory": return ProjectTools.create_directory(input)
+
+		# scene
+		"get_current_scene": return SceneTools.get_current_scene(input)
+		"get_scene_tree": return SceneTools.get_scene_tree(input)
+		"get_node": return SceneTools.get_node(input)
+		"open_scene": return SceneTools.open_scene(input)
+		"save_scene": return SceneTools.save_scene(input)
+		"create_node": return SceneTools.create_node(input)
+		"delete_node": return SceneTools.delete_node(input)
+		"set_node_property": return SceneTools.set_node_property(input)
+		"attach_script": return SceneTools.attach_script(input)
+
+		# scripts
+		"create_script": return ScriptTools.create_script(input)
+		"patch_script": return ScriptTools.patch_script(input)
+
+		# editor
+		"run_project": return EditorTools.run_project(input)
+		"stop_project": return EditorTools.stop_project(input)
+		"get_class_docs": return EditorTools.get_class_docs(input)
+		"list_singletons": return EditorTools.list_singletons(input)
+
+		# assets — async (image gen calls a REST API)
+		"generate_image":
+			var result: Dictionary = await ImageTools.generate_image(parent, input)
+			return result
+
+	return {"ok": false, "error": "unknown tool: %s" % name}
