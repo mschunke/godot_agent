@@ -4,6 +4,7 @@ extends Control
 const Agent := preload("res://addons/godot_agent/core/agent.gd")
 const Settings := preload("res://addons/godot_agent/core/settings.gd")
 const SettingsDialogScript := preload("res://addons/godot_agent/ui/settings_dialog.gd")
+const HistoryDialogScript := preload("res://addons/godot_agent/ui/history_dialog.gd")
 
 var plugin: EditorPlugin  # assigned by plugin.gd
 
@@ -16,6 +17,7 @@ var _status_label: Label
 var _provider_menu: OptionButton
 var _web_toggle: CheckBox
 var _settings_dialog: Window
+var _history_dialog: Window
 
 
 func _ready() -> void:
@@ -29,6 +31,8 @@ func _ready() -> void:
 	_agent.turn_started.connect(_on_turn_started)
 	_agent.turn_finished.connect(_on_turn_finished)
 	_agent.error_occurred.connect(_on_error)
+	_agent.conversation_loaded.connect(_on_conversation_loaded)
+	_agent.history_changed.connect(_on_history_changed)
 
 	_build_ui()
 	_refresh_provider_menu()
@@ -75,6 +79,12 @@ func _build_ui() -> void:
 	settings_btn.text = "Settings"
 	settings_btn.pressed.connect(_open_settings)
 	top.add_child(settings_btn)
+
+	var history_btn := Button.new()
+	history_btn.text = "History"
+	history_btn.tooltip_text = "Browse previous conversations"
+	history_btn.pressed.connect(_open_history)
+	top.add_child(history_btn)
 
 	var reset_btn := Button.new()
 	reset_btn.text = "New chat"
@@ -147,13 +157,88 @@ func _open_settings() -> void:
 	_settings_dialog.popup_centered()
 
 
+func _open_history() -> void:
+	if _history_dialog == null or not is_instance_valid(_history_dialog):
+		_history_dialog = HistoryDialogScript.new()
+		add_child(_history_dialog)
+		_history_dialog.load_requested.connect(_on_history_load)
+		_history_dialog.delete_requested.connect(_on_history_delete)
+	_history_dialog.refresh(_agent.list_conversations())
+	_history_dialog.popup_centered()
+
+
+func _on_history_load(id: String) -> void:
+	if _agent.is_busy():
+		_append_bubble("error", "Wait for the current turn to finish before loading another chat.")
+		return
+	var r: Dictionary = _agent.load_conversation(id)
+	if not r.get("ok", false):
+		_append_bubble("error", "Failed to load chat: %s" % r.get("error", ""))
+
+
+func _on_history_delete(id: String) -> void:
+	_agent.delete_conversation(id)
+	if _history_dialog and is_instance_valid(_history_dialog):
+		_history_dialog.refresh(_agent.list_conversations())
+
+
+func _on_history_changed() -> void:
+	if _history_dialog and is_instance_valid(_history_dialog) and _history_dialog.visible:
+		_history_dialog.refresh(_agent.list_conversations())
+
+
+func _on_conversation_loaded() -> void:
+	_clear_messages_ui()
+	if _agent.conversation.is_empty():
+		_append_bubble("system", "New chat started.")
+	else:
+		_replay_conversation(_agent.conversation)
+		_append_bubble("system", "Loaded chat: %s" % _agent.conversation.title)
+
+
+func _clear_messages_ui() -> void:
+	for child in _messages_container.get_children():
+		child.queue_free()
+
+
+func _replay_conversation(convo) -> void:
+	# Build a lookup of tool_use_id → tool name from assistant messages so
+	# tool_result bubbles during replay can show which tool they belong to.
+	var name_by_id: Dictionary = {}
+	for m in convo.messages():
+		var content: Variant = m.get("content", [])
+		if typeof(content) != TYPE_ARRAY or m.get("role", "") != "assistant":
+			continue
+		for block in content:
+			if block.get("type", "") == "tool_use":
+				name_by_id[block.get("id", "")] = block.get("name", "")
+
+	for m in convo.messages():
+		var role: String = m.get("role", "")
+		var content: Variant = m.get("content", [])
+		if typeof(content) != TYPE_ARRAY:
+			continue
+		for block in content:
+			match block.get("type", ""):
+				"text":
+					if role == "user":
+						_append_bubble("user", String(block.get("text", "")))
+					elif role == "assistant":
+						_append_bubble("assistant", String(block.get("text", "")))
+				"tool_result":
+					var raw := String(block.get("content", ""))
+					var is_err := bool(block.get("is_error", false))
+					var tool_use_id := String(block.get("tool_use_id", ""))
+					var tool_name := String(name_by_id.get(tool_use_id, "tool"))
+					_append_tool_bubble(tool_name, not is_err, raw)
+				# tool_use blocks are elided from the replay since their tool_result
+				# already conveys what happened.
+
+
 func _on_reset() -> void:
 	if _agent.is_busy():
 		return
 	_agent.reset()
-	for child in _messages_container.get_children():
-		child.queue_free()
-	_append_bubble("system", "New chat started.")
 
 
 func _on_input_gui_input(event: InputEvent) -> void:
@@ -188,8 +273,7 @@ func _on_tool_started(tool_name: String, input: Dictionary) -> void:
 
 func _on_tool_finished(tool_name: String, result: Dictionary) -> void:
 	var ok := bool(result.get("ok", true))
-	var glyph := "✓" if ok else "✗"
-	_append_bubble("tool", "%s %s → %s" % [glyph, tool_name, JSON.stringify(result).left(400)])
+	_append_tool_bubble(tool_name, ok, JSON.stringify(result))
 	_status_label.text = ""
 
 
@@ -204,12 +288,94 @@ func _on_turn_finished(reason: String) -> void:
 
 
 func _on_error(msg: String) -> void:
-	_append_bubble("error", msg)
+	_append_error_bubble(msg)
 
 
 # ---------- bubble rendering ----------
 
 func _append_bubble(role: String, text: String) -> void:
+	var panel := _make_bubble_panel(role)
+	var vb := _bubble_vbox(panel)
+	vb.add_child(_role_label(role))
+
+	var use_markdown := role == "assistant"
+	vb.add_child(_make_body_label(text, use_markdown))
+
+	_messages_container.add_child(panel)
+	call_deferred("_scroll_to_bottom")
+
+
+func _append_tool_bubble(tool_name: String, ok: bool, result_text: String) -> void:
+	var panel := _make_bubble_panel("tool")
+	var vb := _bubble_vbox(panel)
+
+	var glyph := "✓" if ok else "✗"
+	var summary := "%s  %s  (%d chars — click to expand)" % [glyph, tool_name, result_text.length()]
+
+	var header := Button.new()
+	header.text = "▶  " + summary
+	header.flat = true
+	header.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	header.focus_mode = Control.FOCUS_NONE
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vb.add_child(header)
+
+	var body := _make_body_label(result_text, false)
+	body.visible = false
+	vb.add_child(body)
+
+	header.pressed.connect(func() -> void:
+		body.visible = not body.visible
+		header.text = ("▼  " if body.visible else "▶  ") + summary)
+
+	_messages_container.add_child(panel)
+	call_deferred("_scroll_to_bottom")
+
+
+func _append_error_bubble(msg: String) -> void:
+	var panel := _make_bubble_panel("error")
+	var vb := _bubble_vbox(panel)
+
+	var first_line := msg.get_slice("\n", 0)
+	if first_line.length() > 120:
+		first_line = first_line.substr(0, 117) + "..."
+
+	var header := Button.new()
+	header.text = "▼  ERROR — " + first_line
+	header.flat = true
+	header.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	header.focus_mode = Control.FOCUS_NONE
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vb.add_child(header)
+
+	var body := _make_body_label(msg, false)
+	body.visible = true
+	vb.add_child(body)
+
+	header.pressed.connect(func() -> void:
+		body.visible = not body.visible
+		header.text = ("▼  " if body.visible else "▶  ") + "ERROR — " + first_line)
+
+	var actions := HBoxContainer.new()
+	actions.alignment = BoxContainer.ALIGNMENT_END
+	actions.add_theme_constant_override("separation", 6)
+	vb.add_child(actions)
+
+	var retry_btn := Button.new()
+	retry_btn.text = "Retry"
+	retry_btn.tooltip_text = "Re-send the last user message to the model"
+	retry_btn.pressed.connect(func() -> void:
+		retry_btn.disabled = true
+		var r: Dictionary = await _agent.retry_last()
+		if not r.get("ok", false):
+			_append_error_bubble("Retry failed: %s" % r.get("error", "")))
+	actions.add_child(retry_btn)
+
+	_messages_container.add_child(panel)
+	call_deferred("_scroll_to_bottom")
+
+
+func _make_bubble_panel(role: String) -> PanelContainer:
 	var panel := PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
@@ -234,32 +400,80 @@ func _append_bubble(role: String, text: String) -> void:
 		_:
 			style.bg_color = Color(0.20, 0.20, 0.22)
 	panel.add_theme_stylebox_override("panel", style)
+	return panel
 
+
+func _bubble_vbox(panel: PanelContainer) -> VBoxContainer:
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 2)
 	panel.add_child(vb)
+	return vb
 
+
+func _role_label(role: String) -> Label:
 	var role_label := Label.new()
 	role_label.text = role.to_upper()
 	role_label.add_theme_font_size_override("font_size", 10)
 	role_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.8))
-	vb.add_child(role_label)
+	return role_label
 
+
+func _make_body_label(text: String, use_markdown: bool) -> RichTextLabel:
 	var body := RichTextLabel.new()
-	body.bbcode_enabled = false
+	body.bbcode_enabled = use_markdown
 	body.fit_content = true
 	body.selection_enabled = true
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.text = text
-	vb.add_child(body)
+	# fit_content + autowrap only computes height once the label knows its width,
+	# which in a fresh ScrollContainer layout isn't set for a frame or two. A
+	# small min height keeps the bubble visible while the layout settles.
+	body.custom_minimum_size = Vector2(0, 24)
+	if use_markdown:
+		body.text = _markdown_to_bbcode(text)
+	else:
+		body.text = text
+	return body
 
-	_messages_container.add_child(panel)
-	# Scroll to bottom on next frame after the new bubble is laid out.
-	call_deferred("_scroll_to_bottom")
+
+static func _markdown_to_bbcode(text: String) -> String:
+	# Escape existing BBCode brackets so they render literally.
+	var s := text.replace("[", "[lb]")
+
+	var re_code := RegEx.new()
+	re_code.compile("`([^`\\n]+)`")
+	s = re_code.sub(s, "[code]$1[/code]", true)
+
+	var re_h3 := RegEx.new()
+	re_h3.compile("(?m)^###\\s+(.+)$")
+	s = re_h3.sub(s, "[b]$1[/b]", true)
+
+	var re_h2 := RegEx.new()
+	re_h2.compile("(?m)^##\\s+(.+)$")
+	s = re_h2.sub(s, "[b][font_size=16]$1[/font_size][/b]", true)
+
+	var re_h1 := RegEx.new()
+	re_h1.compile("(?m)^#\\s+(.+)$")
+	s = re_h1.sub(s, "[b][font_size=18]$1[/font_size][/b]", true)
+
+	var re_bold := RegEx.new()
+	re_bold.compile("\\*\\*([^*\\n]+)\\*\\*")
+	s = re_bold.sub(s, "[b]$1[/b]", true)
+
+	var re_italic := RegEx.new()
+	re_italic.compile("(?<![\\w*])\\*([^*\\n]+)\\*(?![\\w*])")
+	s = re_italic.sub(s, "[i]$1[/i]", true)
+
+	return s
 
 
 func _scroll_to_bottom() -> void:
+	# Wait two frames so newly-added bubbles get laid out and RichTextLabel
+	# with fit_content has computed its final height before we read max_value.
+	if not is_instance_valid(_messages_scroll):
+		return
+	await get_tree().process_frame
+	await get_tree().process_frame
 	if not is_instance_valid(_messages_scroll):
 		return
 	var sb := _messages_scroll.get_v_scroll_bar()

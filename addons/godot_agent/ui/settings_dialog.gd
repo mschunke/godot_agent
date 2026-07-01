@@ -125,7 +125,7 @@ func _build_ui() -> void:
 	content.add_child(sp_header_row)
 
 	var sp_hint := Label.new()
-	sp_hint.text = "Sent to the model at the start of every turn. Edits apply to the next message you send — no need to start a new chat."
+	sp_hint.text = "Sent to the model at the start of a chat. Edits apply to new chats only — existing chats keep the prompt they were created with."
 	sp_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	sp_hint.add_theme_color_override("font_color", Color(0.65, 0.65, 0.7))
 	content.add_child(sp_hint)

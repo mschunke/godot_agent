@@ -4,6 +4,7 @@ class_name GodotAgentAgent
 
 const Settings := preload("res://addons/godot_agent/core/settings.gd")
 const Conversation := preload("res://addons/godot_agent/core/conversation.gd")
+const ConversationStore := preload("res://addons/godot_agent/core/conversation_store.gd")
 const AgentLogger := preload("res://addons/godot_agent/core/logger.gd")
 const ToolSchemas := preload("res://addons/godot_agent/tools/tool_schemas.gd")
 const ToolRegistry := preload("res://addons/godot_agent/tools/tool_registry.gd")
@@ -15,6 +16,8 @@ signal tool_finished(name: String, result: Dictionary)
 signal turn_started
 signal turn_finished(reason: String)
 signal error_occurred(message: String)
+signal conversation_loaded  # emitted when a different conversation becomes active (new or loaded)
+signal history_changed      # emitted when a save occurred, so the history UI can refresh
 
 var conversation: Conversation
 var logger: AgentLogger
@@ -27,7 +30,15 @@ func _init(parent: Node) -> void:
 	parent_node = parent
 	conversation = Conversation.new()
 	conversation.set_system_prompt(Settings.system_prompt())
+	conversation.changed.connect(_on_conversation_changed)
 	logger = AgentLogger.new()
+
+
+func _on_conversation_changed() -> void:
+	# Autosave the current conversation to disk. Skipped internally when empty.
+	var r: Dictionary = ConversationStore.save(conversation)
+	if r.get("ok", false) and not r.get("skipped", false):
+		history_changed.emit()
 
 
 func is_busy() -> bool:
@@ -46,12 +57,26 @@ func send_user_message(text: String) -> void:
 	await _run_loop()
 
 
+func retry_last() -> Dictionary:
+	# Re-run the model against the current conversation state. Only valid when we
+	# have at least one turn already, aren't currently busy, and the last recorded
+	# message is a user message (either the original prompt or a tool_result batch)
+	# so the model has something to respond to.
+	if _busy:
+		return {"ok": false, "error": "agent is busy"}
+	var msgs := conversation.messages()
+	if msgs.is_empty():
+		return {"ok": false, "error": "nothing to retry"}
+	var last: Dictionary = msgs[msgs.size() - 1]
+	if last.get("role", "") != "user":
+		return {"ok": false, "error": "last message is not a user message"}
+	await _run_loop()
+	return {"ok": true}
+
+
 func _run_loop() -> void:
 	_busy = true
 	turn_started.emit()
-
-	# Pick up any system-prompt edits the user made since the last turn.
-	conversation.set_system_prompt(Settings.system_prompt())
 
 	var provider_name := Settings.provider()
 	var provider = ProviderFactory.create(provider_name)
@@ -120,5 +145,35 @@ func _finish(reason: String, extra: String) -> void:
 func reset() -> void:
 	if _busy:
 		return
-	conversation.clear()
-	conversation.set_system_prompt(Settings.system_prompt())
+	# Replace with a fresh Conversation so it gets a new id/timestamps.
+	var new_convo := Conversation.new()
+	new_convo.set_system_prompt(Settings.system_prompt())
+	new_convo.changed.connect(_on_conversation_changed)
+	conversation = new_convo
+	conversation_loaded.emit()
+
+
+func load_conversation(id: String) -> Dictionary:
+	if _busy:
+		return {"ok": false, "error": "agent is busy"}
+	var r: Dictionary = ConversationStore.load_by_id(id)
+	if not r.get("ok", false):
+		return r
+	var loaded := Conversation.new()
+	loaded.load_from_dict(r.data)
+	# Keep the system prompt that was captured when this chat was originally started.
+	loaded.changed.connect(_on_conversation_changed)
+	conversation = loaded
+	conversation_loaded.emit()
+	return {"ok": true, "id": id, "title": loaded.title}
+
+
+func list_conversations() -> Array:
+	return ConversationStore.list_summaries()
+
+
+func delete_conversation(id: String) -> Dictionary:
+	var r: Dictionary = ConversationStore.delete_by_id(id)
+	if r.get("ok", false):
+		history_changed.emit()
+	return r

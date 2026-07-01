@@ -22,6 +22,7 @@ Thumbs.db
 *.swp
 *.swo
 
-# Never commit API keys or agent logs
+# Never commit API keys, chat history, or agent logs
 addons/godot_agent/logs/
+addons/godot_agent/conversations/
 addons/godot_agent/.secrets
