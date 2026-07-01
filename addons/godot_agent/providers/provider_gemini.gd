@@ -196,3 +196,42 @@ func _convert_messages(messages: Array) -> Array:
 				parts2.append({"text": m.content})
 			out.append({"role": "user", "parts": parts2})
 	return out
+
+
+func list_models(parent: Node) -> Dictionary:
+	var key := Settings.api_key("gemini")
+	if key == "":
+		return {"ok": false, "error": "Gemini API key not set", "chat": [], "image": []}
+
+	var chat: Array = []
+	var images: Array = []
+	var page_token := ""
+	for _i in 10:
+		var url := "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=" + key
+		if page_token != "":
+			url += "&pageToken=" + page_token
+		var resp: Dictionary = await Http.get_json(parent, url, PackedStringArray())
+		if not resp.get("ok", false):
+			return {"ok": false, "error": "gemini http %s: %s" % [resp.get("code", "?"), resp.get("raw", "")], "chat": [], "image": []}
+		var data: Variant = resp.get("body", {})
+		if typeof(data) != TYPE_DICTIONARY:
+			break
+		for m in data.get("models", []):
+			var full_name := String(m.get("name", ""))
+			# "models/gemini-2.5-pro" -> "gemini-2.5-pro"
+			var id_str := full_name.trim_prefix("models/")
+			if id_str == "":
+				continue
+			var display := String(m.get("displayName", id_str))
+			var methods: Array = m.get("supportedGenerationMethods", [])
+			var lower := id_str.to_lower()
+			if "predict" in methods and lower.begins_with("imagen"):
+				images.append({"id": id_str, "label": display})
+			elif "generateContent" in methods and lower.begins_with("gemini"):
+				chat.append({"id": id_str, "label": display})
+		page_token = String(data.get("nextPageToken", ""))
+		if page_token == "":
+			break
+	chat.sort_custom(func(a, b): return a.id < b.id)
+	images.sort_custom(func(a, b): return a.id < b.id)
+	return {"ok": true, "error": "", "chat": chat, "image": images}

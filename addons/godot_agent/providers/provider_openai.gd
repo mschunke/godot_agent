@@ -160,3 +160,37 @@ func _normalize_stop(finish: String, tool_calls: Array) -> String:
 		"length": return "max_tokens"
 		"tool_calls": return "tool_use"
 	return "other"
+
+
+func list_models(parent: Node) -> Dictionary:
+	var key := Settings.api_key("openai")
+	if key == "":
+		return {"ok": false, "error": "OpenAI API key not set", "chat": [], "image": []}
+	var headers := PackedStringArray([
+		"Authorization: Bearer " + key,
+	])
+	var resp: Dictionary = await Http.get_json(parent, "https://api.openai.com/v1/models", headers)
+	if not resp.get("ok", false):
+		return {"ok": false, "error": "openai http %s: %s" % [resp.get("code", "?"), resp.get("raw", "")], "chat": [], "image": []}
+	var data: Variant = resp.get("body", {})
+	if typeof(data) != TYPE_DICTIONARY:
+		return {"ok": false, "error": "unexpected response shape", "chat": [], "image": []}
+
+	var chat: Array = []
+	var images: Array = []
+	for m in data.get("data", []):
+		var id_str := String(m.get("id", ""))
+		if id_str == "":
+			continue
+		var lower := id_str.to_lower()
+		# Image models: dall-e-*, gpt-image-*.
+		if lower.begins_with("dall-e") or lower.begins_with("gpt-image"):
+			images.append({"id": id_str, "label": id_str})
+			continue
+		# Chat/reasoning models: keep prefixes we know, drop everything else
+		# (embeddings, tts, whisper, moderations, ...).
+		if lower.begins_with("gpt-") or lower.begins_with("o1") or lower.begins_with("o3") or lower.begins_with("o4") or lower.begins_with("chatgpt-"):
+			chat.append({"id": id_str, "label": id_str})
+	chat.sort_custom(func(a, b): return a.id < b.id)
+	images.sort_custom(func(a, b): return a.id < b.id)
+	return {"ok": true, "error": "", "chat": chat, "image": images}

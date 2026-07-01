@@ -104,3 +104,39 @@ func _normalize_stop(reason: String) -> String:
 		"tool_use": return "tool_use"
 		"max_tokens": return "max_tokens"
 	return "other"
+
+
+func list_models(parent: Node) -> Dictionary:
+	var key := Settings.api_key("anthropic")
+	if key == "":
+		return {"ok": false, "error": "Anthropic API key not set", "chat": [], "image": []}
+	var headers := PackedStringArray([
+		"x-api-key: " + key,
+		"anthropic-version: " + API_VERSION,
+	])
+	var chat: Array = []
+	var next_page := ""
+	# Anthropic paginates via `after_id`. Loop a few pages defensively.
+	for _i in 5:
+		var url := "https://api.anthropic.com/v1/models?limit=100"
+		if next_page != "":
+			url += "&after_id=" + next_page
+		var resp: Dictionary = await Http.get_json(parent, url, headers)
+		if not resp.get("ok", false):
+			return {"ok": false, "error": "anthropic http %s: %s" % [resp.get("code", "?"), resp.get("raw", "")], "chat": [], "image": []}
+		var data: Variant = resp.get("body", {})
+		if typeof(data) != TYPE_DICTIONARY:
+			break
+		var items: Array = data.get("data", [])
+		for m in items:
+			chat.append({
+				"id": String(m.get("id", "")),
+				"label": String(m.get("display_name", m.get("id", ""))),
+			})
+		if not bool(data.get("has_more", false)):
+			break
+		next_page = String(data.get("last_id", ""))
+		if next_page == "":
+			break
+	# Anthropic offers no image-gen models.
+	return {"ok": true, "error": "", "chat": chat, "image": []}

@@ -21,6 +21,9 @@ const K_MODEL_ANTHROPIC := PREFIX + "models/anthropic"
 const K_MODEL_OPENAI := PREFIX + "models/openai"
 const K_MODEL_GEMINI := PREFIX + "models/gemini"
 
+const K_IMAGE_MODEL_OPENAI := PREFIX + "image_models/openai"
+const K_IMAGE_MODEL_GEMINI := PREFIX + "image_models/gemini"
+
 const K_IMAGE_PROVIDER := PREFIX + "image_provider"
 const K_SYSTEM_PROMPT := PREFIX + "system_prompt"
 
@@ -28,7 +31,10 @@ const DEFAULT_MODEL_ANTHROPIC := "claude-sonnet-4-5-20250929"
 const DEFAULT_MODEL_OPENAI := "gpt-5"
 const DEFAULT_MODEL_GEMINI := "gemini-2.5-pro"
 
-const DEFAULT_SYSTEM_PROMPT := "You're an experienced Godot game designer and software engineer. Complete the requested tasks in the current Godot project. When executing a task, make sure to ask clarifications if required, then create a plan to execute the task, execute, and, if possible, try to test and debug without user intervention."
+const DEFAULT_IMAGE_MODEL_OPENAI := "gpt-image-1"
+const DEFAULT_IMAGE_MODEL_GEMINI := "imagen-4.0-generate-001"
+
+const DEFAULT_SYSTEM_PROMPT := "You're an experienced Godot game designer and software engineer. Complete the requested tasks in the current Godot project, including scenes and scripts. When executing a task, make sure to ask clarifications if required, then create a plan to execute the task, delegate execution to a subagent, and, if possible, try to test and debug with minimal user intervention."
 
 const PROVIDERS := ["anthropic", "openai", "gemini"]
 
@@ -90,6 +96,19 @@ static func set_model_for(p: String, value: String) -> void:
 		"anthropic": _write(K_MODEL_ANTHROPIC, value)
 		"openai": _write(K_MODEL_OPENAI, value)
 		"gemini": _write(K_MODEL_GEMINI, value)
+
+
+static func image_model_for(p: String) -> String:
+	match p:
+		"openai": return String(_read(K_IMAGE_MODEL_OPENAI, DEFAULT_IMAGE_MODEL_OPENAI))
+		"gemini": return String(_read(K_IMAGE_MODEL_GEMINI, DEFAULT_IMAGE_MODEL_GEMINI))
+	return ""
+
+
+static func set_image_model_for(p: String, value: String) -> void:
+	match p:
+		"openai": _write(K_IMAGE_MODEL_OPENAI, value)
+		"gemini": _write(K_IMAGE_MODEL_GEMINI, value)
 
 
 static func web_enabled() -> bool:

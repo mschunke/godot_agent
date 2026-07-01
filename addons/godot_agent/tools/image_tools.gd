@@ -56,7 +56,7 @@ static func _gen_openai(parent: Node, prompt: String, size: String) -> PackedByt
 		"Authorization: Bearer " + key,
 	])
 	var body := {
-		"model": "gpt-image-1",
+		"model": Settings.image_model_for("openai"),
 		"prompt": prompt,
 		"size": size,
 		"n": 1,
@@ -82,9 +82,9 @@ static func _gen_gemini(parent: Node, prompt: String) -> PackedByteArray:
 	var key := Settings.api_key("gemini")
 	if key == "":
 		return PackedByteArray()
-	# Imagen 4 via Generative Language API. Older `imagen-3.0-generate-002`
-	# was retired and now returns 404.
-	var model := "imagen-4.0-generate-001"
+	# User-configured Imagen model (default: imagen-4.0-generate-001). Older
+	# models like imagen-3.0-generate-002 were retired and now return 404.
+	var model := Settings.image_model_for("gemini")
 	var url := "https://generativelanguage.googleapis.com/v1beta/models/%s:predict?key=%s" % [model, key]
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	var body := {

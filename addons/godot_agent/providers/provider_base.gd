@@ -38,6 +38,15 @@ func format_tool_results(_results: Array) -> Dictionary:
 	return {"role": "user", "content": parts}
 
 
+# Fetch the list of models available for this provider using the configured
+# API key. Returns:
+#   { ok: bool, error: String,
+#     chat:  [{id: String, label: String}],
+#     image: [{id: String, label: String}] }
+func list_models(_parent: Node) -> Dictionary:
+	return {"ok": false, "error": "list_models not implemented", "chat": [], "image": []}
+
+
 static func stringify(v: Variant) -> String:
 	if typeof(v) == TYPE_STRING:
 		return v
