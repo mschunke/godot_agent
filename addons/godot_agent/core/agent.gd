@@ -104,7 +104,7 @@ func _run_loop() -> void:
 			return
 
 		var assistant_content: Array = resp.assistant_content
-		conversation.add_assistant(assistant_content)
+		conversation.add_assistant(assistant_content, provider_name, Settings.model_for(provider_name))
 		if resp.text != "":
 			message_appended.emit("assistant", resp.text)
 

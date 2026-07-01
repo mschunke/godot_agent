@@ -70,7 +70,7 @@ func _build_ui() -> void:
 	_image_provider_menu = OptionButton.new()
 	_image_provider_menu.add_item("Auto (match chat provider, fall back)", 0)
 	_image_provider_menu.add_item("OpenAI (gpt-image-1)", 1)
-	_image_provider_menu.add_item("Gemini (Imagen 3)", 2)
+	_image_provider_menu.add_item("Gemini (Imagen 4)", 2)
 	var current_img := Settings.image_provider()
 	var idx := 0
 	if current_img == "openai": idx = 1

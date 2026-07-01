@@ -82,8 +82,10 @@ static func _gen_gemini(parent: Node, prompt: String) -> PackedByteArray:
 	var key := Settings.api_key("gemini")
 	if key == "":
 		return PackedByteArray()
-	# Imagen 3 fast via Generative Language API.
-	var url := "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=" + key
+	# Imagen 4 via Generative Language API. Older `imagen-3.0-generate-002`
+	# was retired and now returns 404.
+	var model := "imagen-4.0-generate-001"
+	var url := "https://generativelanguage.googleapis.com/v1beta/models/%s:predict?key=%s" % [model, key]
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	var body := {
 		"instances": [{"prompt": prompt}],

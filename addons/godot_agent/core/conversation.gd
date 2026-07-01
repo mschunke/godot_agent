@@ -64,11 +64,16 @@ func add_user_text(text: String) -> void:
 	changed.emit()
 
 
-func add_assistant(content: Array) -> void:
-	_messages.append({
+func add_assistant(content: Array, provider: String = "", model: String = "") -> void:
+	var msg: Dictionary = {
 		"role": "assistant",
 		"content": content,
-	})
+	}
+	if provider != "":
+		msg["provider"] = provider
+	if model != "":
+		msg["model"] = model
+	_messages.append(msg)
 	_touch()
 	changed.emit()
 

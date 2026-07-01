@@ -73,10 +73,17 @@ func _send(parent: Node, url: String, headers: PackedStringArray, body: Dictiona
 	var canonical_content: Array = []
 	var call_counter := 0
 	for p in parts:
-		if p.has("text"):
-			text += String(p.text)
-			canonical_content.append({"type": "text", "text": String(p.text)})
-		elif p.has("functionCall"):
+		# Thought summary parts carry a `thoughtSignature` that the API requires
+		# to be echoed back on subsequent turns. They may or may not include a
+		# visible `text` field. Preserve them verbatim as a "thought" block so
+		# _convert_messages can round-trip them exactly.
+		if p.get("thought", false) or p.has("thoughtSignature"):
+			canonical_content.append({
+				"type": "thought",
+				"_gemini_native": p,
+			})
+			continue
+		if p.has("functionCall"):
 			var fc: Dictionary = p.functionCall
 			# Gemini doesn't emit call IDs; synthesize one so tool_result matching works.
 			call_counter += 1
@@ -89,8 +96,11 @@ func _send(parent: Node, url: String, headers: PackedStringArray, body: Dictiona
 				"id": id_str,
 				"name": fc.name,
 				"input": input_dict,
-				"_gemini_native": fc,  # kept so _convert_messages can round-trip it
+				"_gemini_native": fc,  # kept so _convert_messages can round-trip it (incl. thoughtSignature)
 			})
+		elif p.has("text"):
+			text += String(p.text)
+			canonical_content.append({"type": "text", "text": String(p.text)})
 
 	var stop := "end_turn"
 	if not tool_calls.is_empty():
@@ -147,9 +157,24 @@ func _convert_messages(messages: Array) -> Array:
 				for block in m.content:
 					if block.type == "text":
 						parts.append({"text": String(block.get("text", ""))})
+					elif block.type == "thought":
+						# Echo back the raw thought part exactly as received so
+						# its `thoughtSignature` remains valid.
+						var t_native: Variant = block.get("_gemini_native", null)
+						if typeof(t_native) == TYPE_DICTIONARY:
+							parts.append(t_native)
 					elif block.type == "tool_use":
 						name_by_id[block.id] = block.name
-						parts.append({"functionCall": {"name": block.name, "args": block.input}})
+						# Newer Gemini "thinking" models emit a `thoughtSignature`
+						# on each functionCall part and reject follow-up requests
+						# whose echoed functionCall omits it. Prefer the native
+						# fc dict we stashed on parse so the signature (and any
+						# future fields) survive the round-trip.
+						var native: Variant = block.get("_gemini_native", null)
+						if typeof(native) == TYPE_DICTIONARY:
+							parts.append({"functionCall": native})
+						else:
+							parts.append({"functionCall": {"name": block.name, "args": block.input}})
 			elif typeof(m.content) == TYPE_STRING:
 				parts.append({"text": m.content})
 			out.append({"role": "model", "parts": parts})
