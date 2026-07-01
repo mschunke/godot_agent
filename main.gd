@@ -24,11 +24,11 @@ const MAP = [
 
 var tile_size = 32.0
 
-var score = 0
 var total_dots = 0
 
 @onready var world = $World
 @onready var score_label = $UI/ScoreLabel
+@onready var high_score_label = $UI/HighScoreLabel
 @onready var game_over_label = $UI/GameOverLabel
 @onready var win_label = $UI/WinLabel
 @onready var start_label = $UI/StartLabel
@@ -39,6 +39,9 @@ var PlayerScene = preload("res://player.tscn")
 var GhostScene = preload("res://ghost.tscn")
 
 func _ready():
+	Global.reset_score()
+	score_label.text = "Score: " + str(Global.current_score)
+	high_score_label.text = "High Score: " + str(Global.high_score)
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	$World.process_mode = Node.PROCESS_MODE_PAUSABLE
 	randomize()
@@ -84,8 +87,9 @@ func build_level():
 				world.add_child(ghost)
 
 func add_score(pts: int):
-	score += pts
-	score_label.text = "Score: " + str(score)
+	Global.add_score(pts)
+	score_label.text = "Score: " + str(Global.current_score)
+	high_score_label.text = "High Score: " + str(Global.high_score)
 	total_dots -= 1
 	if total_dots <= 0:
 		win_game()

@@ -316,8 +316,8 @@ func _on_pick(provider: String, is_image: bool, anchor: Button) -> void:
 		menu.queue_free())
 	menu.close_requested.connect(func() -> void: menu.queue_free())
 
-	var rect: Rect2 = anchor.get_screen_rect()
-	menu.position = Vector2i(rect.position.x, rect.position.y + int(rect.size.y))
+	var pos: Vector2 = anchor.get_screen_position()
+	menu.position = Vector2i(int(pos.x), int(pos.y + anchor.size.y))
 	menu.popup()
 
 

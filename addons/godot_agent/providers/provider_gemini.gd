@@ -97,7 +97,7 @@ func _send(parent: Node, url: String, headers: PackedStringArray, body: Dictiona
 		# or a bare `thoughtSignature` with no visible text. Preserve them
 		# verbatim so _convert_messages can round-trip them and Gemini's next
 		# request passes signature validation.
-		var is_pure_thought := p.get("thought", false) or (p.has("thoughtSignature") and not p.has("text"))
+		var is_pure_thought: bool = bool(p.get("thought", false)) or (p.has("thoughtSignature") and not p.has("text"))
 		if is_pure_thought:
 			canonical_content.append({
 				"type": "thought",

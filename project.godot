@@ -20,6 +20,10 @@ run/main_scene="uid://cx6y83l17p6u"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
 
+[autoload]
+
+Global="*res://global.gd"
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/godot_agent/plugin.cfg")
