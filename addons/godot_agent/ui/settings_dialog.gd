@@ -98,7 +98,7 @@ func _build_ui() -> void:
 
 	_max_turns_edit = SpinBox.new()
 	_max_turns_edit.min_value = 1
-	_max_turns_edit.max_value = 200
+	_max_turns_edit.max_value = 1000
 	_max_turns_edit.value = Settings.max_tool_turns()
 	_max_turns_edit.value_changed.connect(func(v: float) -> void: Settings.set_max_tool_turns(int(v)))
 	turns_row.add_child(_max_turns_edit)

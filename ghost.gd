@@ -1,6 +1,8 @@
 extends CharacterBody2D
 
-var speed = 120.0 # Slightly slower than player
+var normal_speed = 120.0 # Slightly slower than player
+var speed = normal_speed
+var vulnerable_speed = 60.0
 var tile_size = 32.0
 
 var direction = Vector2.ZERO
@@ -65,7 +67,34 @@ func is_wall_in_direction(dir: Vector2, from_pos: Vector2) -> bool:
 		return true
 	return false
 
+var is_vulnerable = false
+
+func set_vulnerable(v: bool):
+	if is_vulnerable == v:
+		return
+	is_vulnerable = v
+	if is_vulnerable:
+		$Sprite2D.modulate = Color(0, 0, 1, 1) # Blue
+		speed = vulnerable_speed
+		# Reverse direction immediately when becoming vulnerable
+		direction = -direction
+		last_decision_tile = Vector2(-1, -1)
+	else:
+		$Sprite2D.modulate = Color(1, 1, 1, 1) # Normal
+		speed = normal_speed
+
+func die():
+	# For simplicity, let's just queue_free() the ghost
+	# A real pacman game would respawn them in the center, but this works
+	var main = get_tree().get_root().get_node("Main")
+	if main:
+		main.add_score(200) # Score for eating a ghost
+	queue_free()
+
 func _on_hitbox_body_entered(body):
 	if body.is_in_group("player"):
-		if body.has_method("die"):
-			body.die()
+		if is_vulnerable:
+			die()
+		else:
+			if body.has_method("die"):
+				body.die()

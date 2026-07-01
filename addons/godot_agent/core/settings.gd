@@ -120,7 +120,7 @@ static func set_web_enabled(value: bool) -> void:
 
 
 static func max_tool_turns() -> int:
-	return int(_read(K_MAX_TURNS, 25))
+	return int(_read(K_MAX_TURNS, 100))
 
 
 static func set_max_tool_turns(value: int) -> void:

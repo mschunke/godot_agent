@@ -105,6 +105,9 @@ func _run_loop() -> void:
 
 		var assistant_content: Array = resp.assistant_content
 		conversation.add_assistant(assistant_content, provider_name, Settings.model_for(provider_name))
+		var usage_variant: Variant = resp.get("usage", {})
+		if typeof(usage_variant) == TYPE_DICTIONARY:
+			conversation.add_usage(provider_name, usage_variant)
 		if resp.text != "":
 			message_appended.emit("assistant", resp.text)
 

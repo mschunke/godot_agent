@@ -17,6 +17,7 @@ var _retry_button: Button
 var _status_label: Label
 var _status_dot: Panel
 var _status_dot_style: StyleBoxFlat
+var _token_label: Label
 var _provider_menu: OptionButton
 var _web_toggle: CheckBox
 var _settings_dialog: Window
@@ -172,6 +173,14 @@ func _build_ui() -> void:
 	_retry_button.pressed.connect(_on_retry_pressed)
 	input_row.add_child(_retry_button)
 
+	_token_label = Label.new()
+	_token_label.text = ""
+	_token_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_token_label.add_theme_color_override("font_color", Color(0.65, 0.65, 0.72))
+	_token_label.tooltip_text = "Cumulative tokens used by this conversation (input / output)."
+	input_row.add_child(_token_label)
+	_refresh_token_label()
+
 
 func _refresh_provider_menu() -> void:
 	_provider_menu.clear()
@@ -237,6 +246,7 @@ func _on_conversation_loaded() -> void:
 	else:
 		_replay_conversation(_agent.conversation)
 		_append_bubble("system", "Loaded chat: %s" % _agent.conversation.title)
+	_refresh_token_label()
 	_update_retry_button()
 
 
@@ -313,6 +323,7 @@ func _on_tool_finished(tool_name: String, result: Dictionary) -> void:
 	var ok := bool(result.get("ok", true))
 	_append_tool_bubble(tool_name, ok, JSON.stringify(result))
 	_set_status("processing", "thinking...")
+	_refresh_token_label()
 
 
 func _on_turn_started() -> void:
@@ -326,13 +337,19 @@ func _on_turn_finished(reason: String) -> void:
 	if reason == "error":
 		# _on_error already set the error status; leave it.
 		pass
+	elif reason == "max_turns":
+		_set_status("idle", "paused (max_turns) — type 'Continue' to keep going")
 	else:
 		_set_status("idle", "done (%s)" % reason)
 	_send_button.disabled = false
-	# If the model returned nothing visible and didn't call any tool, warn the
-	# user and offer an inline Retry — otherwise the chat looks stuck.
-	if reason != "error" and not _turn_produced_output:
+	# Max-turn stop always gets its own notice so the user knows what happened
+	# and how to resume, even if the last turn already produced visible output.
+	if reason == "max_turns":
+		_append_max_turns_notice()
+	elif reason != "error" and not _turn_produced_output:
+		# Empty final turn — the model didn't say or do anything visible.
 		_append_empty_turn_notice(reason)
+	_refresh_token_label()
 	_update_retry_button()
 
 
@@ -354,6 +371,29 @@ func _update_retry_button() -> void:
 	var msgs: Array = _agent.conversation.messages()
 	var can := not msgs.is_empty() and String(msgs[msgs.size() - 1].get("role", "")) == "user"
 	_retry_button.disabled = not can
+
+
+func _refresh_token_label() -> void:
+	if not is_instance_valid(_token_label):
+		return
+	var t: Dictionary = _agent.conversation.totals()
+	var total: int = int(t.get("total", 0))
+	if total <= 0:
+		_token_label.text = "tokens: —"
+		return
+	var inp: int = int(t.get("input", 0))
+	var outp: int = int(t.get("output", 0))
+	_token_label.text = "tokens: %s in / %s out (%s)" % [
+		_format_tokens(inp), _format_tokens(outp), _format_tokens(total)
+	]
+
+
+static func _format_tokens(n: int) -> String:
+	if n < 1000:
+		return str(n)
+	if n < 1_000_000:
+		return "%.1fk" % (float(n) / 1000.0)
+	return "%.2fM" % (float(n) / 1_000_000.0)
 
 
 func _on_retry_pressed() -> void:
@@ -473,6 +513,34 @@ func _append_empty_turn_notice(reason: String) -> void:
 			_append_error_bubble("Retry failed: %s" % r.get("error", ""))
 		_update_retry_button())
 	actions.add_child(retry_btn)
+
+	_messages_container.add_child(panel)
+	call_deferred("_scroll_to_bottom")
+
+
+func _append_max_turns_notice() -> void:
+	var panel := _make_bubble_panel("system")
+	var vb := _bubble_vbox(panel)
+	vb.add_child(_role_label("notice"))
+
+	var cap := Settings.max_tool_turns()
+	var msg := "Reached the tool-turn cap (%d) for this run. The task is paused, not failed — type [b]Continue[/b] (or any follow-up) to let the model keep working. You can raise the cap in Settings if this happens often." % cap
+	vb.add_child(_make_body_label(msg, true))
+
+	var actions := HBoxContainer.new()
+	actions.alignment = BoxContainer.ALIGNMENT_END
+	actions.add_theme_constant_override("separation", 6)
+	vb.add_child(actions)
+
+	var continue_btn := Button.new()
+	continue_btn.text = "Continue"
+	continue_btn.tooltip_text = "Send 'Continue' as the next user message"
+	continue_btn.pressed.connect(func() -> void:
+		if _agent.is_busy():
+			return
+		continue_btn.disabled = true
+		_agent.send_user_message("Continue"))
+	actions.add_child(continue_btn)
 
 	_messages_container.add_child(panel)
 	call_deferred("_scroll_to_bottom")

@@ -87,7 +87,9 @@ func refresh(summaries: Array) -> void:
 		var when := _format_time(int(s.get("updated_at", 0)))
 		var count: int = int(s.get("message_count", 0))
 		var title_txt := String(s.get("title", "(untitled)"))
-		_list.add_item("%s\n  %s · %d msg" % [title_txt, when, count])
+		var tokens: int = int(s.get("tokens_total", 0))
+		var token_str := "  ·  %s tok" % _format_tokens(tokens) if tokens > 0 else ""
+		_list.add_item("%s\n  %s · %d msg%s" % [title_txt, when, count, token_str])
 	_empty_label.visible = _summaries.is_empty()
 	_load_btn.disabled = true
 	_delete_btn.disabled = true
@@ -136,3 +138,11 @@ static func _format_time(unix: int) -> String:
 		return "—"
 	var dt := Time.get_datetime_dict_from_unix_time(unix)
 	return "%04d-%02d-%02d %02d:%02d" % [dt.year, dt.month, dt.day, dt.hour, dt.minute]
+
+
+static func _format_tokens(n: int) -> String:
+	if n < 1000:
+		return str(n)
+	if n < 1_000_000:
+		return "%.1fk" % (float(n) / 1000.0)
+	return "%.2fM" % (float(n) / 1_000_000.0)

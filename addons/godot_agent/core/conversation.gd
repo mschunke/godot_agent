@@ -25,6 +25,7 @@ var updated_at: int = 0
 
 var _messages: Array = []
 var _system_prompt: String = ""
+var _totals: Dictionary = {"input": 0, "output": 0, "total": 0}
 
 
 func _init() -> void:
@@ -99,6 +100,39 @@ func is_empty() -> bool:
 	return _messages.is_empty()
 
 
+func totals() -> Dictionary:
+	return _totals.duplicate()
+
+
+func add_usage(provider: String, usage: Dictionary) -> void:
+	# Normalize the provider's native usage shape to {input, output, total}.
+	if usage == null or usage.is_empty():
+		return
+	var delta_in := 0
+	var delta_out := 0
+	match provider:
+		"anthropic":
+			delta_in = int(usage.get("input_tokens", 0)) \
+				+ int(usage.get("cache_creation_input_tokens", 0)) \
+				+ int(usage.get("cache_read_input_tokens", 0))
+			delta_out = int(usage.get("output_tokens", 0))
+		"openai":
+			delta_in = int(usage.get("prompt_tokens", 0))
+			delta_out = int(usage.get("completion_tokens", 0))
+		"gemini":
+			# Gemini reports thinking tokens separately; they're billed as output.
+			delta_in = int(usage.get("promptTokenCount", 0))
+			delta_out = int(usage.get("candidatesTokenCount", 0)) \
+				+ int(usage.get("thoughtsTokenCount", 0))
+	if delta_in == 0 and delta_out == 0:
+		return
+	_totals["input"] = int(_totals.get("input", 0)) + delta_in
+	_totals["output"] = int(_totals.get("output", 0)) + delta_out
+	_totals["total"] = int(_totals.get("input", 0)) + int(_totals.get("output", 0))
+	_touch()
+	changed.emit()
+
+
 func to_dict() -> Dictionary:
 	return {
 		"version": FORMAT_VERSION,
@@ -108,6 +142,7 @@ func to_dict() -> Dictionary:
 		"updated_at": updated_at,
 		"system_prompt": _system_prompt,
 		"messages": _messages,
+		"totals": _totals,
 	}
 
 
@@ -119,6 +154,15 @@ func load_from_dict(data: Dictionary) -> void:
 	_system_prompt = String(data.get("system_prompt", ""))
 	var raw_msgs: Variant = data.get("messages", [])
 	_messages = raw_msgs if typeof(raw_msgs) == TYPE_ARRAY else []
+	var raw_totals: Variant = data.get("totals", null)
+	if typeof(raw_totals) == TYPE_DICTIONARY:
+		_totals = {
+			"input": int(raw_totals.get("input", 0)),
+			"output": int(raw_totals.get("output", 0)),
+			"total": int(raw_totals.get("total", 0)),
+		}
+	else:
+		_totals = {"input": 0, "output": 0, "total": 0}
 	changed.emit()
 
 

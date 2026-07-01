@@ -2,7 +2,7 @@ extends Node2D
 
 const MAP = [
 	"1111111111111111111",
-	"1222222221222222221",
+	"1322222221222222231",
 	"1211121111111211121",
 	"1222222222222222221",
 	"1211121211121211121",
@@ -18,7 +18,7 @@ const MAP = [
 	"1211121111111211121",
 	"122212222P222212221",
 	"1112121111111212111",
-	"1222222222222222221",
+	"1322222222222222231",
 	"1111111111111111111"
 ]
 
@@ -35,8 +35,12 @@ var total_dots = 0
 
 var WallScene = preload("res://wall.tscn")
 var DotScene = preload("res://dot.tscn")
+var FruitScene = preload("res://fruit.tscn")
 var PlayerScene = preload("res://player.tscn")
 var GhostScene = preload("res://ghost.tscn")
+
+var power_mode_active = false
+var power_mode_timer = 0.0
 
 func _ready():
 	Global.reset_score()
@@ -77,6 +81,11 @@ func build_level():
 				dot.position = pos
 				world.add_child(dot)
 				total_dots += 1
+			elif char == "3":
+				var fruit = FruitScene.instantiate()
+				fruit.position = pos
+				world.add_child(fruit)
+				total_dots += 1
 			elif char == "P":
 				var player = PlayerScene.instantiate()
 				player.position = pos
@@ -90,6 +99,8 @@ func add_score(pts: int):
 	Global.add_score(pts)
 	score_label.text = "Score: " + str(Global.current_score)
 	high_score_label.text = "High Score: " + str(Global.high_score)
+
+func dot_eaten():
 	total_dots -= 1
 	if total_dots <= 0:
 		win_game()
@@ -102,7 +113,26 @@ func win_game():
 	win_label.visible = true
 	get_tree().paused = true
 
-func _process(_delta):
+func activate_power_mode():
+	power_mode_active = true
+	power_mode_timer = 10.0
+	for ghost in get_tree().get_nodes_in_group("ghost"):
+		if ghost.has_method("set_vulnerable"):
+			ghost.set_vulnerable(true)
+
+func deactivate_power_mode():
+	power_mode_active = false
+	for ghost in get_tree().get_nodes_in_group("ghost"):
+		if ghost.has_method("set_vulnerable"):
+			ghost.set_vulnerable(false)
+
+
+func _process(delta):
+	if power_mode_active and not get_tree().paused:
+		power_mode_timer -= delta
+		if power_mode_timer <= 0:
+			deactivate_power_mode()
+
 	if Input.is_action_just_pressed("ui_accept"):
 		if start_label.visible:
 			start_label.visible = false

@@ -67,12 +67,17 @@ static func list_summaries() -> Array:
 				if typeof(parsed) == TYPE_DICTIONARY:
 					var msgs: Variant = parsed.get("messages", [])
 					var count: int = msgs.size() if typeof(msgs) == TYPE_ARRAY else 0
+					var totals_v: Variant = parsed.get("totals", {})
+					var totals: Dictionary = totals_v if typeof(totals_v) == TYPE_DICTIONARY else {}
 					out.append({
 						"id": String(parsed.get("id", name.get_basename())),
 						"title": String(parsed.get("title", "(untitled)")),
 						"created_at": int(parsed.get("created_at", 0)),
 						"updated_at": int(parsed.get("updated_at", 0)),
 						"message_count": count,
+						"tokens_total": int(totals.get("total", 0)),
+						"tokens_input": int(totals.get("input", 0)),
+						"tokens_output": int(totals.get("output", 0)),
 					})
 		name = dir.get_next()
 	dir.list_dir_end()
