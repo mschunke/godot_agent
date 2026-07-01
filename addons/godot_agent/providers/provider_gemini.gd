@@ -16,16 +16,45 @@ func send_conversation(parent: Node, system: String, messages: Array, tools: Arr
 
 	var headers := PackedStringArray(["Content-Type: application/json"])
 
+	var effective_system := system
+	var native_tools := _convert_tools(tools)
+
+	# Gemini rejects google_search grounding when it's combined with functionDeclarations
+	# ("Built-in tools and Function Calling cannot be combined"). Since our tool set is
+	# essential for the agent to actually do anything, we drop google_search and tell
+	# the model about the limitation via the system prompt.
+	if web_enabled and native_tools.is_empty():
+		# Very rare path — no functions at all — safe to attach grounding.
+		effective_system = _append_web_note(effective_system, false)
+		var body := {
+			"contents": _convert_messages(messages),
+			"tools": [{"google_search": {}}],
+		}
+		if effective_system != "":
+			body["systemInstruction"] = {"parts": [{"text": effective_system}]}
+		return await _send(parent, url, headers, body)
+
+	if web_enabled:
+		effective_system = _append_web_note(effective_system, true)
+
 	var body := {
 		"contents": _convert_messages(messages),
-		"tools": [{"functionDeclarations": _convert_tools(tools)}],
+		"tools": [{"functionDeclarations": native_tools}],
 	}
-	if system != "":
-		body["systemInstruction"] = {"parts": [{"text": system}]}
-	if web_enabled:
-		# Gemini exposes native Google Search grounding as a separate tool entry.
-		body["tools"].append({"google_search": {}})
+	if effective_system != "":
+		body["systemInstruction"] = {"parts": [{"text": effective_system}]}
 
+	return await _send(parent, url, headers, body)
+
+
+func _append_web_note(system: String, tools_present: bool) -> String:
+	if tools_present:
+		var note := "\n\n[Web search: The user enabled internet access, but the Gemini API disallows combining Google Search grounding with function calling. Live search is unavailable this turn; rely on your own knowledge or ask the user to switch to Anthropic/OpenAI for web-heavy tasks.]"
+		return system + note
+	return system
+
+
+func _send(parent: Node, url: String, headers: PackedStringArray, body: Dictionary) -> Dictionary:
 	var resp: Dictionary = await Http.post_json(parent, url, headers, body)
 	if not resp.get("ok", false):
 		return {"ok": false, "error": "gemini http error %s: %s" % [resp.get("code", "?"), resp.get("raw", "")]}
