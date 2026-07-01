@@ -23,6 +23,10 @@ var _history_dialog: Window
 func _ready() -> void:
 	custom_minimum_size = Vector2(400, 300)
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Editor's main-screen container is a VBoxContainer; without expand flags
+	# our root sits at its minimum size and leaves empty space below.
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	size_flags_vertical = Control.SIZE_EXPAND_FILL
 
 	_agent = Agent.new(self)
 	_agent.message_appended.connect(_on_agent_message)
@@ -468,14 +472,16 @@ static func _markdown_to_bbcode(text: String) -> String:
 
 
 func _scroll_to_bottom() -> void:
-	# Wait two frames so newly-added bubbles get laid out and RichTextLabel
-	# with fit_content has computed its final height before we read max_value.
-	if not is_instance_valid(_messages_scroll):
-		return
-	await get_tree().process_frame
-	await get_tree().process_frame
+	# RichTextLabel with fit_content needs several layout passes before its
+	# final height is reported to the ScrollContainer. Snap to max across a few
+	# frames so the last frame catches the finalized size.
 	if not is_instance_valid(_messages_scroll):
 		return
 	var sb := _messages_scroll.get_v_scroll_bar()
-	if sb:
+	if sb == null:
+		return
+	for i in 6:
+		await get_tree().process_frame
+		if not is_instance_valid(_messages_scroll):
+			return
 		_messages_scroll.scroll_vertical = int(sb.max_value)
