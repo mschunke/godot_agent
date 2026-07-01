@@ -1,13 +1,13 @@
-[gd_scene load_steps=2 format=3 uid="uid://cx6y83l17p6u"]
+[gd_scene format=3 uid="uid://cx6y83l17p6u"]
 
-[ext_resource type="Script" path="res://main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://cu8eyjcsghsib" path="res://main.gd" id="1_main"]
 
-[node name="Main" type="Node2D"]
+[node name="Main" type="Node2D" unique_id=1236225815]
 script = ExtResource("1_main")
 
-[node name="UI" type="CanvasLayer" parent="."]
+[node name="UI" type="CanvasLayer" parent="." unique_id=1890759983]
 
-[node name="ScoreLabel" type="Label" parent="UI"]
+[node name="ScoreLabel" type="Label" parent="UI" unique_id=1414984217]
 offset_left = 10.0
 offset_top = 10.0
 offset_right = 100.0
@@ -15,7 +15,7 @@ offset_bottom = 33.0
 theme_override_font_sizes/font_size = 24
 text = "Score: 0"
 
-[node name="GameOverLabel" type="Label" parent="UI"]
+[node name="GameOverLabel" type="Label" parent="UI" unique_id=96397069]
 visible = false
 anchors_preset = 15
 anchor_right = 1.0
@@ -28,7 +28,7 @@ text = "GAME OVER"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="WinLabel" type="Label" parent="UI"]
+[node name="WinLabel" type="Label" parent="UI" unique_id=1019057291]
 visible = false
 anchors_preset = 15
 anchor_right = 1.0
@@ -41,4 +41,15 @@ text = "YOU WIN!"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="World" type="Node2D" parent="."]
+[node name="StartLabel" type="Label" parent="UI" unique_id=198950886]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 48
+text = "PRESS ENTER TO START"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="World" type="Node2D" parent="." unique_id=162632010]

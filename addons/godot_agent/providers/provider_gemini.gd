@@ -93,11 +93,12 @@ func _send(parent: Node, url: String, headers: PackedStringArray, body: Dictiona
 				"_gemini_native_part": p,
 			})
 			continue
-		# Standalone thought summary parts (no functionCall). May or may not have
-		# a visible `text` field. Preserve them verbatim as a "thought" block so
-		# _convert_messages can round-trip them exactly and Gemini's next request
-		# passes signature validation.
-		if p.get("thought", false) or p.has("thoughtSignature"):
+		# Pure thought summary parts: either explicitly marked `thought: true`,
+		# or a bare `thoughtSignature` with no visible text. Preserve them
+		# verbatim so _convert_messages can round-trip them and Gemini's next
+		# request passes signature validation.
+		var is_pure_thought := p.get("thought", false) or (p.has("thoughtSignature") and not p.has("text"))
+		if is_pure_thought:
 			canonical_content.append({
 				"type": "thought",
 				"_gemini_native": p,
@@ -105,7 +106,13 @@ func _send(parent: Node, url: String, headers: PackedStringArray, body: Dictiona
 			continue
 		if p.has("text"):
 			text += String(p.text)
-			canonical_content.append({"type": "text", "text": String(p.text)})
+			var text_block := {"type": "text", "text": String(p.text)}
+			# The final answer part on thinking models sometimes carries a
+			# thoughtSignature too — keep the whole raw part so future turns
+			# round-trip the signature back to Gemini.
+			if p.has("thoughtSignature"):
+				text_block["_gemini_native_part"] = p
+			canonical_content.append(text_block)
 
 	var stop := "end_turn"
 	if not tool_calls.is_empty():
@@ -161,7 +168,14 @@ func _convert_messages(messages: Array) -> Array:
 			if typeof(m.content) == TYPE_ARRAY:
 				for block in m.content:
 					if block.type == "text":
-						parts.append({"text": String(block.get("text", ""))})
+						# If Gemini attached a thoughtSignature to this final
+						# answer part, echo the whole raw part so the signature
+						# round-trips. Otherwise send a plain text part.
+						var text_native: Variant = block.get("_gemini_native_part", null)
+						if typeof(text_native) == TYPE_DICTIONARY:
+							parts.append(text_native)
+						else:
+							parts.append({"text": String(block.get("text", ""))})
 					elif block.type == "thought":
 						# Echo back the raw thought part exactly as received so
 						# its `thoughtSignature` remains valid.
