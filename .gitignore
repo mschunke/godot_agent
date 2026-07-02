@@ -26,3 +26,7 @@ Thumbs.db
 addons/godot_agent/logs/
 addons/godot_agent/conversations/
 addons/godot_agent/.secrets
+
+# Runtime engine log dumps
+last_log.txt
+*.log

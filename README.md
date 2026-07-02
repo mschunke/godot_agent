@@ -11,17 +11,24 @@ An in-editor AI programming assistant for Godot 4.x. Talks to the models you alr
 
 ## Install
 
-### Option A — clone this repo as a Godot project
+### Option A — Godot Asset Library (recommended)
 
-```
-git clone https://github.com/<you>/godot-agent.git
-```
-
-Open the folder in Godot 4 (`Project → Import`). The addon is already listed under `Project → Project Settings → Plugins`.
+1. In Godot 4, open the **AssetLib** tab at the top of the editor.
+2. Search for **Godot Agent** and click **Download**.
+3. Keep the default file selection (only `addons/godot_agent/`) and click **Install**.
+4. Enable **Godot Agent** in `Project → Project Settings → Plugins`.
 
 ### Option B — drop the addon into your own project
 
-Copy `addons/godot_agent/` into your project's `addons/` folder, then enable **Godot Agent** in `Project → Project Settings → Plugins`.
+Copy `addons/godot_agent/` from this repo into your project's `addons/` folder, then enable **Godot Agent** in `Project → Project Settings → Plugins`.
+
+### Option C — clone this repo as a Godot project
+
+```
+git clone https://github.com/mschunke/godot_agent.git
+```
+
+Open the folder in Godot 4 (`Project → Import`). The addon is already listed under `Project → Project Settings → Plugins`.
 
 ## Configure
 
