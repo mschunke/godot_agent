@@ -180,6 +180,47 @@ static func all() -> Array:
 				"required": ["node_path", "script_path"],
 			},
 		},
+		{
+			"name": "duplicate_node",
+			"description": "Duplicate a node (with its subtree) in the currently edited scene. The clone is added under the same parent; pass `name` to override its auto-generated name. Undoable.",
+			"destructive": true,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"path": {"type": "string", "description": "NodePath of the node to duplicate."},
+					"name": {"type": "string", "description": "Optional new name for the duplicate."},
+				},
+				"required": ["path"],
+			},
+		},
+		{
+			"name": "reparent_node",
+			"description": "Move a node under a new parent within the currently edited scene. keep_global_transform preserves world-space position for Node2D/Node3D. Undoable.",
+			"destructive": true,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"path": {"type": "string"},
+					"new_parent_path": {"type": "string"},
+					"keep_global_transform": {"type": "boolean", "default": true},
+				},
+				"required": ["path", "new_parent_path"],
+			},
+		},
+		{
+			"name": "instantiate_scene",
+			"description": "Instantiate a .tscn scene as a child under parent_path in the currently edited scene. Use for composing scenes (e.g. spawn a Player.tscn inside Main.tscn). Undoable.",
+			"destructive": true,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"scene_path": {"type": "string", "description": "res:// path to the .tscn to instantiate."},
+					"parent_path": {"type": "string", "description": "NodePath of the parent inside the edited scene. Defaults to the root.", "default": ""},
+					"name": {"type": "string", "description": "Optional name for the instantiated node."},
+				},
+				"required": ["scene_path"],
+			},
+		},
 
 		# ---------- scripts ----------
 		{
@@ -258,6 +299,84 @@ static func all() -> Array:
 				"type": "object",
 				"properties": {
 					"path": {"type": "string", "description": "res:// path to the scene, e.g. res://main.tscn"},
+				},
+				"required": ["path"],
+			},
+		},
+		{
+			"name": "get_editor_selection",
+			"description": "Return what the user currently has selected: scene nodes selected in the Scene dock and file paths selected in the FileSystem dock, plus the current scene and directory. Call this before edits so you act on what the user is looking at.",
+			"destructive": false,
+			"parameters": {"type": "object", "properties": {}},
+		},
+		{
+			"name": "set_editor_selection",
+			"description": "Select nodes in the currently edited scene and/or a file in the FileSystem dock. Use after creating or modifying something so the user immediately sees it. node_paths clears existing selection first.",
+			"destructive": false,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"node_paths": {"type": "array", "items": {"type": "string"}, "description": "NodePaths from the scene root."},
+					"file_paths": {"type": "array", "items": {"type": "string"}, "description": "res:// paths to reveal in the FileSystem dock."},
+				},
+			},
+		},
+		{
+			"name": "open_script",
+			"description": "Open a script in the Script editor and optionally jump to a line/column. Use after create_script or patch_script so the user lands on the code you just changed.",
+			"destructive": false,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"path": {"type": "string", "description": "res:// path to a .gd (or Script) file."},
+					"line": {"type": "integer", "default": -1},
+					"column": {"type": "integer", "default": 0},
+				},
+				"required": ["path"],
+			},
+		},
+
+		# ---------- signals ----------
+		{
+			"name": "connect_signal",
+			"description": "Wire a signal on source_path (a node in the currently edited scene) to `method` on target_path. Uses CONNECT_PERSIST so the wiring is saved into the .tscn, just like a connection made via the Node dock. Undoable.",
+			"destructive": true,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"source_path": {"type": "string", "description": "NodePath of the node emitting the signal."},
+					"signal": {"type": "string", "description": "Signal name, e.g. \"pressed\"."},
+					"target_path": {"type": "string", "description": "NodePath of the node whose method will be called."},
+					"method": {"type": "string", "description": "Method name on the target node."},
+				},
+				"required": ["source_path", "signal", "target_path", "method"],
+			},
+		},
+		{
+			"name": "disconnect_signal",
+			"description": "Remove a signal connection from source_path to target_path.method in the currently edited scene. Undoable.",
+			"destructive": true,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"source_path": {"type": "string"},
+					"signal": {"type": "string"},
+					"target_path": {"type": "string"},
+					"method": {"type": "string"},
+				},
+				"required": ["source_path", "signal", "target_path", "method"],
+			},
+		},
+		{
+			"name": "list_signal_connections",
+			"description": "List signal connections on a node: outgoing (signals this node emits, and where they are wired) and/or incoming (signals from elsewhere connected to this node's methods).",
+			"destructive": false,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"path": {"type": "string"},
+					"include_outgoing": {"type": "boolean", "default": true},
+					"include_incoming": {"type": "boolean", "default": true},
 				},
 				"required": ["path"],
 			},

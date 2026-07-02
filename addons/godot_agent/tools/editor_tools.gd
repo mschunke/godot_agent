@@ -132,6 +132,100 @@ static func set_main_scene(input: Dictionary) -> Dictionary:
 	}
 
 
+static func get_editor_selection(_input: Dictionary) -> Dictionary:
+	# Reports what the user is currently looking at: selected scene nodes,
+	# selected FileSystem-dock paths, the open scene and the current FS directory.
+	var result: Dictionary = {
+		"ok": true,
+		"selected_nodes": [],
+		"selected_files": [],
+		"current_scene": "",
+		"current_directory": EditorInterface.get_current_directory(),
+	}
+
+	var root: Node = EditorInterface.get_edited_scene_root()
+	if root != null:
+		result["current_scene"] = root.scene_file_path
+		var sel: EditorSelection = EditorInterface.get_selection()
+		if sel != null:
+			var nodes: Array = []
+			for n in sel.get_selected_nodes():
+				var node: Node = n
+				nodes.append({
+					"path": String(root.get_path_to(node)),
+					"name": String(node.name),
+					"type": node.get_class(),
+				})
+			result["selected_nodes"] = nodes
+
+	var files: Array = []
+	for p in EditorInterface.get_selected_paths():
+		files.append(p)
+	result["selected_files"] = files
+	return result
+
+
+static func set_editor_selection(input: Dictionary) -> Dictionary:
+	# Selects nodes in the currently edited scene and/or a file in the
+	# FileSystem dock. Useful right after creating something so the user
+	# can see it. `node_paths` are NodePaths from the scene root.
+	var node_paths: Array = input.get("node_paths", [])
+	var file_paths: Array = input.get("file_paths", [])
+	var out: Dictionary = {"ok": true, "selected_nodes": [], "selected_files": []}
+
+	if node_paths.size() > 0:
+		var root: Node = EditorInterface.get_edited_scene_root()
+		if root == null:
+			return {"ok": false, "error": "no scene is currently open"}
+		var sel: EditorSelection = EditorInterface.get_selection()
+		if sel == null:
+			return {"ok": false, "error": "EditorSelection unavailable"}
+		sel.clear()
+		var selected: Array = []
+		for raw in node_paths:
+			var p: String = String(raw)
+			var node: Node = null
+			if p == "" or p == "." or p == "/":
+				node = root
+			elif root.has_node(p):
+				node = root.get_node(p)
+			if node == null:
+				return {"ok": false, "error": "node not found: %s" % p}
+			sel.add_node(node)
+			selected.append(String(root.get_path_to(node)))
+		out["selected_nodes"] = selected
+
+	# `select_file` accepts a single path; select each in turn so the last one
+	# is visible/focused, which matches how the FileSystem dock is normally driven.
+	var chosen_files: Array = []
+	for raw in file_paths:
+		var fp: String = String(raw)
+		if not fp.begins_with("res://"):
+			fp = "res://" + fp.lstrip("/")
+		EditorInterface.select_file(fp)
+		chosen_files.append(fp)
+	out["selected_files"] = chosen_files
+	return out
+
+
+static func open_script(input: Dictionary) -> Dictionary:
+	# Opens a .gd (or any Script resource) in the script editor and optionally
+	# jumps to a line/column. Uses EditorInterface.edit_script, which respects
+	# the user's configured external editor if any.
+	var path: String = input.get("path", "")
+	var line: int = int(input.get("line", -1))
+	var column: int = int(input.get("column", 0))
+	if path == "":
+		return {"ok": false, "error": "path is required"}
+	if not ResourceLoader.exists(path):
+		return {"ok": false, "error": "script not found: %s" % path}
+	var script: Variant = load(path)
+	if not (script is Script):
+		return {"ok": false, "error": "not a Script resource: %s" % path}
+	EditorInterface.edit_script(script, line, column, true)
+	return {"ok": true, "path": path, "line": line, "column": column}
+
+
 static func _find_by_class(node: Node, cls: String) -> Node:
 	if node.get_class() == cls:
 		return node

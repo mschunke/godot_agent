@@ -44,11 +44,14 @@ The agent exposes a canonical toolset that every provider is adapted to:
 
 | Domain     | Tools |
 | ---------- | ----- |
-| Filesystem | `list_project_files`, `read_file`, `write_file`, `create_directory` |
-| Scenes     | `get_current_scene`, `get_scene_tree`, `get_node`, `open_scene`, `save_scene`, `create_node`, `delete_node`, `set_node_property`, `attach_script` |
+| Filesystem | `list_project_files`, `read_file`, `write_file`, `create_directory`, `get_project_tree` |
+| Scenes     | `get_current_scene`, `get_scene_tree`, `get_node`, `open_scene`, `save_scene`, `create_node`, `delete_node`, `set_node_property`, `attach_script`, `duplicate_node`, `reparent_node`, `instantiate_scene` |
 | Scripts    | `create_script`, `patch_script` |
-| Editor     | `run_project`, `stop_project`, `get_class_docs`, `list_singletons` |
+| Signals    | `connect_signal`, `disconnect_signal`, `list_signal_connections` |
+| Editor     | `run_project`, `stop_project`, `get_class_docs`, `list_singletons`, `read_console_logs`, `set_main_scene`, `get_editor_selection`, `set_editor_selection`, `open_script` |
 | Assets     | `generate_image` (OpenAI `gpt-image-1` or Gemini Imagen) |
+
+Destructive scene edits (`create_node`, `delete_node`, `set_node_property`, `attach_script`, `duplicate_node`, `reparent_node`, `instantiate_scene`, `connect_signal`, `disconnect_signal`) are registered with `EditorUndoRedoManager`, so `Ctrl+Z` reverts anything the agent did to your scene.
 
 Anthropic doesn't do image generation, so when Claude is the chat provider the image tool automatically routes to whichever of OpenAI / Gemini has a key configured (change in Settings → *Image provider*).
 

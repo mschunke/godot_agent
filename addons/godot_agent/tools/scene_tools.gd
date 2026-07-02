@@ -132,7 +132,7 @@ static func create_node(input: Dictionary) -> Dictionary:
 	if type_name == "" or node_name == "":
 		return {"ok": false, "error": "type and name are required"}
 
-	var root := EditorInterface.get_edited_scene_root()
+	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null:
 		return {"ok": false, "error": "no scene is currently open"}
 
@@ -149,24 +149,53 @@ static func create_node(input: Dictionary) -> Dictionary:
 
 	var new_node: Node = ClassDB.instantiate(type_name)
 	new_node.name = node_name
-	parent.add_child(new_node)
-	new_node.owner = root
+
+	var ur: EditorUndoRedoManager = _undo_redo()
+	if ur == null:
+		parent.add_child(new_node)
+		new_node.owner = root
+		return {"ok": true, "path": String(root.get_path_to(new_node))}
+
+	ur.create_action("Create %s (%s)" % [node_name, type_name])
+	ur.add_do_method(parent, "add_child", new_node)
+	ur.add_do_method(new_node, "set_owner", root)
+	ur.add_undo_method(parent, "remove_child", new_node)
+	# Node is out of the tree on undo — keep it alive so redo can re-add it.
+	ur.add_undo_reference(new_node)
+	ur.commit_action()
 
 	return {"ok": true, "path": String(root.get_path_to(new_node))}
 
 
 static func delete_node(input: Dictionary) -> Dictionary:
 	var path: String = input.get("path", "")
-	var root := EditorInterface.get_edited_scene_root()
+	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null:
 		return {"ok": false, "error": "no scene is currently open"}
-	var node := _resolve(root, path)
+	var node: Node = _resolve(root, path)
 	if node == null:
 		return {"ok": false, "error": "node not found: %s" % path}
 	if node == root:
 		return {"ok": false, "error": "refusing to delete the scene root"}
-	node.get_parent().remove_child(node)
-	node.queue_free()
+
+	var parent: Node = node.get_parent()
+	var old_index: int = node.get_index()
+	var old_owner: Node = node.owner
+
+	var ur: EditorUndoRedoManager = _undo_redo()
+	if ur == null:
+		parent.remove_child(node)
+		node.queue_free()
+		return {"ok": true, "path": path}
+
+	ur.create_action("Delete %s" % String(node.name))
+	ur.add_do_method(parent, "remove_child", node)
+	ur.add_undo_method(parent, "add_child", node)
+	ur.add_undo_method(parent, "move_child", node, old_index)
+	ur.add_undo_method(node, "set_owner", old_owner)
+	# Node is out of the tree after do — keep it alive so undo can re-add it.
+	ur.add_do_reference(node)
+	ur.commit_action()
 	return {"ok": true, "path": path}
 
 
@@ -174,37 +203,199 @@ static func set_node_property(input: Dictionary) -> Dictionary:
 	var path: String = input.get("path", "")
 	var property_name: String = input.get("property", "")
 	var value: Variant = input.get("value")
-	var root := EditorInterface.get_edited_scene_root()
+	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null:
 		return {"ok": false, "error": "no scene is currently open"}
-	var node := _resolve(root, path)
+	var node: Node = _resolve(root, path)
 	if node == null:
 		return {"ok": false, "error": "node not found: %s" % path}
 
-	var coerced: Variant = _coerce_value(value, node.get(property_name))
-	node.set(property_name, coerced)
+	var old_value: Variant = node.get(property_name)
+	var coerced: Variant = _coerce_value(value, old_value)
+
+	var ur: EditorUndoRedoManager = _undo_redo()
+	if ur == null:
+		node.set(property_name, coerced)
+	else:
+		ur.create_action("Set %s.%s" % [String(node.name), property_name])
+		ur.add_do_property(node, property_name, coerced)
+		ur.add_undo_property(node, property_name, old_value)
+		ur.commit_action()
+
 	return {"ok": true, "path": path, "property": property_name, "value": _to_serializable(node.get(property_name))}
 
 
 static func attach_script(input: Dictionary) -> Dictionary:
 	var node_path: String = input.get("node_path", "")
 	var script_path: String = input.get("script_path", "")
-	var root := EditorInterface.get_edited_scene_root()
+	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null:
 		return {"ok": false, "error": "no scene is currently open"}
-	var node := _resolve(root, node_path)
+	var node: Node = _resolve(root, node_path)
 	if node == null:
 		return {"ok": false, "error": "node not found: %s" % node_path}
 	if not ResourceLoader.exists(script_path):
 		return {"ok": false, "error": "script not found: %s" % script_path}
-	var script := load(script_path)
+	var script: Variant = load(script_path)
 	if script == null:
 		return {"ok": false, "error": "failed to load script"}
-	node.set_script(script)
+	var old_script: Variant = node.get_script()
+
+	var ur: EditorUndoRedoManager = _undo_redo()
+	if ur == null:
+		node.set_script(script)
+	else:
+		ur.create_action("Attach script to %s" % String(node.name))
+		ur.add_do_method(node, "set_script", script)
+		ur.add_undo_method(node, "set_script", old_script)
+		ur.commit_action()
+
 	return {"ok": true, "node_path": node_path, "script_path": script_path}
 
 
+static func duplicate_node(input: Dictionary) -> Dictionary:
+	var path: String = input.get("path", "")
+	var new_name: String = input.get("name", "")
+	var root: Node = EditorInterface.get_edited_scene_root()
+	if root == null:
+		return {"ok": false, "error": "no scene is currently open"}
+	var node: Node = _resolve(root, path)
+	if node == null:
+		return {"ok": false, "error": "node not found: %s" % path}
+	if node == root:
+		return {"ok": false, "error": "cannot duplicate the scene root"}
+
+	var parent: Node = node.get_parent()
+	var dup: Node = node.duplicate()
+	if new_name != "":
+		dup.name = new_name
+
+	# We execute add_child + recursive-owner ourselves because Node.owner
+	# requires the node to be in the tree, which makes it awkward to express
+	# as a chain of add_do_method calls (owner setter for children can't run
+	# before add_child). Register the reverse with UndoRedo via commit(false).
+	parent.add_child(dup)
+	_set_owner_recursive(dup, root)
+
+	var ur: EditorUndoRedoManager = _undo_redo()
+	if ur != null:
+		ur.create_action("Duplicate %s" % String(node.name))
+		ur.add_do_method(parent, "add_child", dup)
+		ur.add_do_reference(dup)
+		ur.add_undo_method(parent, "remove_child", dup)
+		# Do-methods above will re-add dup on redo, but its children's owners
+		# would be lost; keep the subtree kicking in that case too.
+		ur.add_undo_reference(dup)
+		ur.commit_action(false)
+
+	return {"ok": true, "path": String(root.get_path_to(dup))}
+
+
+static func reparent_node(input: Dictionary) -> Dictionary:
+	var path: String = input.get("path", "")
+	var new_parent_path: String = input.get("new_parent_path", "")
+	var keep_global: bool = bool(input.get("keep_global_transform", true))
+	var root: Node = EditorInterface.get_edited_scene_root()
+	if root == null:
+		return {"ok": false, "error": "no scene is currently open"}
+	var node: Node = _resolve(root, path)
+	if node == null:
+		return {"ok": false, "error": "node not found: %s" % path}
+	if node == root:
+		return {"ok": false, "error": "cannot reparent the scene root"}
+	var new_parent: Node = _resolve(root, new_parent_path)
+	if new_parent == null:
+		return {"ok": false, "error": "new parent not found: %s" % new_parent_path}
+	if new_parent == node or _is_ancestor(node, new_parent):
+		return {"ok": false, "error": "new parent cannot be the node itself or a descendant"}
+
+	var old_parent: Node = node.get_parent()
+	var old_index: int = node.get_index()
+
+	var ur: EditorUndoRedoManager = _undo_redo()
+	if ur == null:
+		node.reparent(new_parent, keep_global)
+		return {"ok": true, "path": String(root.get_path_to(node))}
+
+	ur.create_action("Reparent %s" % String(node.name))
+	ur.add_do_method(node, "reparent", new_parent, keep_global)
+	ur.add_undo_method(node, "reparent", old_parent, keep_global)
+	ur.add_undo_method(old_parent, "move_child", node, old_index)
+	ur.commit_action()
+
+	return {"ok": true, "path": String(root.get_path_to(node))}
+
+
+static func instantiate_scene(input: Dictionary) -> Dictionary:
+	var scene_path: String = input.get("scene_path", "")
+	var parent_path: String = input.get("parent_path", "")
+	var inst_name: String = input.get("name", "")
+	if scene_path == "":
+		return {"ok": false, "error": "scene_path is required"}
+	if not ResourceLoader.exists(scene_path):
+		return {"ok": false, "error": "scene not found: %s" % scene_path}
+	var packed: PackedScene = load(scene_path)
+	if packed == null:
+		return {"ok": false, "error": "failed to load scene: %s" % scene_path}
+
+	var root: Node = EditorInterface.get_edited_scene_root()
+	if root == null:
+		return {"ok": false, "error": "no scene is currently open"}
+	if scene_path == root.scene_file_path:
+		return {"ok": false, "error": "cannot instantiate a scene into itself (would recurse)"}
+
+	var parent: Node = root
+	if parent_path != "" and parent_path != ".":
+		parent = _resolve(root, parent_path)
+		if parent == null:
+			return {"ok": false, "error": "parent not found: %s" % parent_path}
+
+	# GEN_EDIT_STATE_INSTANCE keeps the instance editable in the current scene.
+	var inst: Node = packed.instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)
+	if inst == null:
+		return {"ok": false, "error": "failed to instantiate scene"}
+	if inst_name != "":
+		inst.name = inst_name
+
+	var ur: EditorUndoRedoManager = _undo_redo()
+	if ur == null:
+		parent.add_child(inst)
+		inst.owner = root
+		return {"ok": true, "path": String(root.get_path_to(inst)), "scene_path": scene_path}
+
+	ur.create_action("Instantiate %s" % scene_path)
+	ur.add_do_method(parent, "add_child", inst)
+	ur.add_do_method(inst, "set_owner", root)
+	ur.add_undo_method(parent, "remove_child", inst)
+	ur.add_undo_reference(inst)
+	ur.commit_action()
+
+	return {"ok": true, "path": String(root.get_path_to(inst)), "scene_path": scene_path}
+
+
 # ---------- helpers ----------
+
+static func _undo_redo() -> EditorUndoRedoManager:
+	return EditorInterface.get_editor_undo_redo()
+
+
+static func _is_ancestor(possible_ancestor: Node, n: Node) -> bool:
+	var cur: Node = n.get_parent()
+	while cur != null:
+		if cur == possible_ancestor:
+			return true
+		cur = cur.get_parent()
+	return false
+
+
+static func _set_owner_recursive(n: Node, new_owner: Node) -> void:
+	# Assign owner for `n` and every descendant so a duplicated subtree is
+	# visible in the Scene dock and persisted on save.
+	if n != new_owner:
+		n.owner = new_owner
+	for c in n.get_children():
+		_set_owner_recursive(c, new_owner)
+
 
 static func _resolve(root: Node, path: String) -> Node:
 	if path == "" or path == "." or path == "/":

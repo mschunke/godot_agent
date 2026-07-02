@@ -9,6 +9,7 @@ const ProjectTools := preload("res://addons/godot_agent/tools/project_tools.gd")
 const SceneTools := preload("res://addons/godot_agent/tools/scene_tools.gd")
 const ScriptTools := preload("res://addons/godot_agent/tools/script_tools.gd")
 const EditorTools := preload("res://addons/godot_agent/tools/editor_tools.gd")
+const SignalTools := preload("res://addons/godot_agent/tools/signal_tools.gd")
 const ImageTools := preload("res://addons/godot_agent/tools/image_tools.gd")
 
 
@@ -35,6 +36,9 @@ static func dispatch(parent: Node, name: String, input: Dictionary) -> Dictionar
 		"delete_node": return SceneTools.delete_node(input)
 		"set_node_property": return SceneTools.set_node_property(input)
 		"attach_script": return SceneTools.attach_script(input)
+		"duplicate_node": return SceneTools.duplicate_node(input)
+		"reparent_node": return SceneTools.reparent_node(input)
+		"instantiate_scene": return SceneTools.instantiate_scene(input)
 
 		# scripts
 		"create_script": return ScriptTools.create_script(input)
@@ -47,6 +51,14 @@ static func dispatch(parent: Node, name: String, input: Dictionary) -> Dictionar
 		"list_singletons": return EditorTools.list_singletons(input)
 		"read_console_logs": return EditorTools.read_console_logs(input)
 		"set_main_scene": return EditorTools.set_main_scene(input)
+		"get_editor_selection": return EditorTools.get_editor_selection(input)
+		"set_editor_selection": return EditorTools.set_editor_selection(input)
+		"open_script": return EditorTools.open_script(input)
+
+		# signals
+		"connect_signal": return SignalTools.connect_signal(input)
+		"disconnect_signal": return SignalTools.disconnect_signal(input)
+		"list_signal_connections": return SignalTools.list_signal_connections(input)
 
 		# assets — async (image gen calls a REST API)
 		"generate_image":
