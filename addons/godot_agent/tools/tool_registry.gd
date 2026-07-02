@@ -23,6 +23,7 @@ static func dispatch(parent: Node, name: String, input: Dictionary) -> Dictionar
 		"read_file": return ProjectTools.read_file(input)
 		"write_file": return ProjectTools.write_file(input)
 		"create_directory": return ProjectTools.create_directory(input)
+		"get_project_tree": return ProjectTools.get_project_tree(input)
 
 		# scene
 		"get_current_scene": return SceneTools.get_current_scene(input)
@@ -44,6 +45,8 @@ static func dispatch(parent: Node, name: String, input: Dictionary) -> Dictionar
 		"stop_project": return EditorTools.stop_project(input)
 		"get_class_docs": return EditorTools.get_class_docs(input)
 		"list_singletons": return EditorTools.list_singletons(input)
+		"read_console_logs": return EditorTools.read_console_logs(input)
+		"set_main_scene": return EditorTools.set_main_scene(input)
 
 		# assets — async (image gen calls a REST API)
 		"generate_image":

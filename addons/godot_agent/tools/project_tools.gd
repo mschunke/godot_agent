@@ -96,3 +96,58 @@ static func create_directory(input: Dictionary) -> Dictionary:
 	if err != OK and err != ERR_ALREADY_EXISTS:
 		return {"ok": false, "error": "mkdir failed: %d" % err}
 	return {"ok": true, "path": path}
+
+
+static func get_project_tree(input: Dictionary) -> Dictionary:
+	# Walks Godot's EditorFileSystem index (the same tree the FileSystem dock shows),
+	# not the raw folder on disk. Returns a nested {name, path, dirs, files} structure.
+	var max_depth: int = int(input.get("max_depth", 8))
+	var include_types: bool = bool(input.get("include_types", false))
+	var subpath: String = input.get("path", "res://")
+	if not subpath.begins_with("res://"):
+		subpath = "res://" + subpath.lstrip("/")
+
+	var fs: EditorFileSystem = EditorInterface.get_resource_filesystem()
+	if fs == null:
+		return {"ok": false, "error": "EditorFileSystem unavailable"}
+
+	var root_dir: EditorFileSystemDirectory = fs.get_filesystem()
+	if root_dir == null:
+		return {"ok": false, "error": "filesystem root not indexed yet"}
+
+	var target: EditorFileSystemDirectory = root_dir
+	if subpath != "res://":
+		target = fs.get_filesystem_path(subpath)
+		if target == null:
+			return {"ok": false, "error": "directory not found in editor filesystem: %s" % subpath}
+
+	var tree: Dictionary = _describe_fs_dir(target, 0, max_depth, include_types)
+	return {"ok": true, "tree": tree}
+
+
+static func _describe_fs_dir(dir: EditorFileSystemDirectory, depth: int, max_depth: int, include_types: bool) -> Dictionary:
+	var entry: Dictionary = {
+		"name": dir.get_name(),
+		"path": dir.get_path(),
+	}
+	if depth >= max_depth:
+		entry["dirs_omitted"] = dir.get_subdir_count()
+		entry["files_omitted"] = dir.get_file_count()
+		return entry
+
+	var dirs: Array = []
+	for i in dir.get_subdir_count():
+		dirs.append(_describe_fs_dir(dir.get_subdir(i), depth + 1, max_depth, include_types))
+	entry["dirs"] = dirs
+
+	var files: Array = []
+	for i in dir.get_file_count():
+		var f: Dictionary = {
+			"name": dir.get_file(i),
+			"path": dir.get_file_path(i),
+		}
+		if include_types:
+			f["type"] = dir.get_file_type(i)
+		files.append(f)
+	entry["files"] = files
+	return entry

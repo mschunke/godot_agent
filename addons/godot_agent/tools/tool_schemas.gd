@@ -65,6 +65,19 @@ static func all() -> Array:
 				"required": ["path"],
 			},
 		},
+		{
+			"name": "get_project_tree",
+			"description": "Return a nested tree of the project's files and folders as seen by Godot's EditorFileSystem (the same index the FileSystem dock shows). Reads the editor's live index, not disk. Prefer this over list_project_files when you want structure.",
+			"destructive": false,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"path": {"type": "string", "description": "res:// subdirectory to start from. Defaults to res://.", "default": "res://"},
+					"max_depth": {"type": "integer", "default": 8},
+					"include_types": {"type": "boolean", "description": "Include the resource type of each file (Script, PackedScene, Texture2D, ...).", "default": false},
+				},
+			},
+		},
 
 		# ---------- scene inspection ----------
 		{
@@ -225,6 +238,29 @@ static func all() -> Array:
 			"description": "Return the names of all engine-level singletons (Engine.get_singleton_list) plus project autoloads.",
 			"destructive": false,
 			"parameters": {"type": "object", "properties": {}},
+		},
+		{
+			"name": "read_console_logs",
+			"description": "Read the editor's Output panel (the Godot console) live from the running editor UI. Includes engine prints, errors and stdout from the last project run. Use to inspect runtime behaviour after run_project.",
+			"destructive": false,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"max_lines": {"type": "integer", "description": "Return at most this many trailing lines.", "default": 200},
+				},
+			},
+		},
+		{
+			"name": "set_main_scene",
+			"description": "Set the project's default (main) scene — the scene that runs when the user presses Play. Writes application/run/main_scene in ProjectSettings and saves project.godot. The scene must exist and be a .tscn or .scn.",
+			"destructive": true,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"path": {"type": "string", "description": "res:// path to the scene, e.g. res://main.tscn"},
+				},
+				"required": ["path"],
+			},
 		},
 
 		# ---------- assets ----------
