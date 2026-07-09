@@ -582,7 +582,7 @@ func _on_agent_message(role: String, text: String) -> void:
 
 func _on_tool_started(tool_name: String, input: Dictionary) -> void:
 	_turn_produced_output = true
-	_set_status("processing", "→ tool: %s(%s)" % [tool_name, JSON.stringify(input).left(160)])
+	_set_status("processing", "→ %s(%s)" % [_format_tool_name(tool_name), JSON.stringify(input).left(160)])
 
 
 func _on_tool_finished(tool_name: String, result: Dictionary) -> void:
@@ -598,7 +598,7 @@ func _on_tool_finished(tool_name: String, result: Dictionary) -> void:
 		_append_image_bubble({
 			"media_type": String(image_content.get("media_type", "image/png")),
 			"data": String(image_content.get("data", "")),
-			"name": "%s result" % tool_name,
+			"name": "%s result" % _format_tool_name(tool_name),
 		})
 	_set_status("processing", "thinking...")
 	_refresh_token_label()
@@ -674,6 +674,19 @@ static func _format_tokens(n: int) -> String:
 	return "%.2fM" % (float(n) / 1_000_000.0)
 
 
+static func _format_tool_name(name: String) -> String:
+	# snake_case → Title Case for display (e.g. "run_project" → "Run Project").
+	if name.is_empty():
+		return "Tool"
+	var parts := name.split("_", false)
+	var out: PackedStringArray = []
+	for p in parts:
+		if p.is_empty():
+			continue
+		out.append(p.substr(0, 1).to_upper() + p.substr(1))
+	return " ".join(out)
+
+
 func _on_retry_pressed() -> void:
 	if _agent.is_busy():
 		return
@@ -743,7 +756,7 @@ func _append_tool_bubble(tool_name: String, ok: bool, result_text: String) -> vo
 	var vb := _bubble_vbox(panel)
 
 	var glyph := "✓" if ok else "✗"
-	var summary := "%s  %s  (%d chars — click to expand)" % [glyph, tool_name, result_text.length()]
+	var summary := "%s  %s  (%d chars — click to expand)" % [glyph, _format_tool_name(tool_name), result_text.length()]
 
 	var header := Button.new()
 	header.text = "▶  " + summary
