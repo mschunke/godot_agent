@@ -208,18 +208,54 @@ func _convert_messages(messages: Array) -> Array:
 				for block in m.content:
 					if block.type == "text":
 						parts2.append({"text": String(block.get("text", ""))})
+					elif block.type == "image":
+						parts2.append(_to_gemini_image_part(block))
 					elif block.type == "tool_result":
 						var name := String(name_by_id.get(block.tool_use_id, ""))
-						parts2.append({
-							"functionResponse": {
-								"name": name,
-								"response": {"content": String(block.content)},
-							},
-						})
+						var content_val: Variant = block.get("content", "")
+						if typeof(content_val) == TYPE_ARRAY:
+							# Rich tool_result: emit the functionResponse with the
+							# text portion, then append any image blocks as
+							# additional inline_data parts in the same user turn.
+							# Gemini can't embed images inside functionResponse.
+							var text_content: String = ""
+							var image_parts: Array = []
+							for inner in content_val:
+								if typeof(inner) != TYPE_DICTIONARY:
+									continue
+								var t: String = String(inner.get("type", ""))
+								if t == "text":
+									text_content += String(inner.get("text", ""))
+								elif t == "image":
+									image_parts.append(_to_gemini_image_part(inner))
+							parts2.append({
+								"functionResponse": {
+									"name": name,
+									"response": {"content": text_content},
+								},
+							})
+							for ip in image_parts:
+								parts2.append(ip)
+						else:
+							parts2.append({
+								"functionResponse": {
+									"name": name,
+									"response": {"content": String(content_val)},
+								},
+							})
 			elif typeof(m.content) == TYPE_STRING:
 				parts2.append({"text": m.content})
 			out.append({"role": "user", "parts": parts2})
 	return out
+
+
+static func _to_gemini_image_part(block: Dictionary) -> Dictionary:
+	return {
+		"inline_data": {
+			"mime_type": String(block.get("media_type", "image/png")),
+			"data": String(block.get("data", "")),
+		},
+	}
 
 
 func list_models(parent: Node) -> Dictionary:

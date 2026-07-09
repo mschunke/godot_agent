@@ -11,6 +11,7 @@ const ScriptTools := preload("res://addons/godot_agent/tools/script_tools.gd")
 const EditorTools := preload("res://addons/godot_agent/tools/editor_tools.gd")
 const SignalTools := preload("res://addons/godot_agent/tools/signal_tools.gd")
 const ImageTools := preload("res://addons/godot_agent/tools/image_tools.gd")
+const InputTools := preload("res://addons/godot_agent/tools/input_tools.gd")
 
 
 static func dispatch(parent: Node, name: String, input: Dictionary) -> Dictionary:
@@ -47,6 +48,10 @@ static func dispatch(parent: Node, name: String, input: Dictionary) -> Dictionar
 		# editor
 		"run_project": return EditorTools.run_project(input)
 		"stop_project": return EditorTools.stop_project(input)
+		"screenshot_game": return EditorTools.screenshot_game(input)
+		"send_input":
+			var input_result: Dictionary = await InputTools.send_input(parent, input)
+			return input_result
 		"get_class_docs": return EditorTools.get_class_docs(input)
 		"list_singletons": return EditorTools.list_singletons(input)
 		"read_console_logs": return EditorTools.read_console_logs(input)

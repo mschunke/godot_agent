@@ -13,6 +13,80 @@ static func stop_project(_input: Dictionary) -> Dictionary:
 	return {"ok": true}
 
 
+static func screenshot_game(input: Dictionary) -> Dictionary:
+	# Captures a screenshot of the display. Godot runs the game in a separate
+	# process, so we can't reach into its viewport from the editor. Instead we
+	# use DisplayServer.screen_get_image(), which grabs the OS screen where
+	# the game window is (or the primary screen if `screen == -1`).
+	#
+	# Returns a text summary and an inline image (base64 PNG) attached to the
+	# tool result so the model can actually see the pixels. Also saves a copy
+	# under user://godot_agent_screenshots/ for the user.
+	var screen: int = int(input.get("screen", -1))
+	var save_path: String = String(input.get("save_path", ""))
+
+	if screen < 0:
+		screen = DisplayServer.get_primary_screen()
+	var screen_count: int = DisplayServer.get_screen_count()
+	if screen < 0 or screen >= screen_count:
+		return {"ok": false, "error": "screen index out of range (have %d screens)" % screen_count}
+
+	var img: Image = DisplayServer.screen_get_image(screen)
+	if img == null or img.is_empty():
+		return {"ok": false, "error": "DisplayServer.screen_get_image returned empty (on Wayland or macOS you may need to grant screen recording permission to Godot)"}
+
+	# Downscale large captures so we don't blow the model's context budget.
+	# Anthropic / OpenAI / Gemini all handle ~1568px well; keep aspect ratio.
+	var w: int = img.get_width()
+	var h: int = img.get_height()
+	var MAX_DIM := 1568
+	if maxi(w, h) > MAX_DIM:
+		var scale: float = float(MAX_DIM) / float(maxi(w, h))
+		var nw: int = int(round(float(w) * scale))
+		var nh: int = int(round(float(h) * scale))
+		img.resize(nw, nh, Image.INTERPOLATE_BILINEAR)
+
+	var png_bytes: PackedByteArray = img.save_png_to_buffer()
+	if png_bytes.is_empty():
+		return {"ok": false, "error": "failed to encode PNG"}
+
+	if save_path == "":
+		DirAccess.make_dir_recursive_absolute("user://godot_agent_screenshots")
+		var stamp: String = Time.get_datetime_string_from_system().replace(":", "-").replace("T", "_")
+		save_path = "user://godot_agent_screenshots/%s.png" % stamp
+	else:
+		var dir_path: String = save_path.get_base_dir()
+		if dir_path != "":
+			DirAccess.make_dir_recursive_absolute(dir_path)
+
+	var f: FileAccess = FileAccess.open(save_path, FileAccess.WRITE)
+	if f == null:
+		return {"ok": false, "error": "cannot open %s for write" % save_path}
+	f.store_buffer(png_bytes)
+	f.close()
+
+	# Refresh the FileSystem dock if we saved into res://.
+	if save_path.begins_with("res://"):
+		var fs := EditorInterface.get_resource_filesystem()
+		if fs:
+			fs.scan()
+
+	return {
+		"ok": true,
+		"path": save_path,
+		"width": img.get_width(),
+		"height": img.get_height(),
+		"screen": screen,
+		"bytes": png_bytes.size(),
+		# Consumed by agent.gd → attached as an image block to the tool_result
+		# so the model can actually view the screenshot.
+		"image_content": {
+			"media_type": "image/png",
+			"data": Marshalls.raw_to_base64(png_bytes),
+		},
+	}
+
+
 static func get_class_docs(input: Dictionary) -> Dictionary:
 	# The parameter is named `class_name` in the schema but that's reserved in GDScript,
 	# so we read it by key.

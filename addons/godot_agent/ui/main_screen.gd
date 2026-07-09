@@ -24,6 +24,14 @@ var _settings_dialog: Window
 var _history_dialog: Window
 var _turn_produced_output: bool = false
 
+# Pending attachments to include with the next user message. Each item:
+#   {kind: "image", media_type, data (base64), name, thumbnail: Texture2D?}
+#   {kind: "text_file", path, content, name}
+var _pending_attachments: Array = []
+var _attachments_row: HBoxContainer
+var _attachments_container: HBoxContainer
+var _file_dialog: FileDialog
+
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(400, 300)
@@ -134,6 +142,29 @@ func _build_ui() -> void:
 
 	_set_status("idle", "Ready")
 
+	# --- pending attachments strip ---
+	# Hidden by default; shown when the user attaches a file or a screenshot.
+	_attachments_row = HBoxContainer.new()
+	_attachments_row.add_theme_constant_override("separation", 6)
+	_attachments_row.visible = false
+	root.add_child(_attachments_row)
+
+	var att_label := Label.new()
+	att_label.text = "Attached:"
+	att_label.add_theme_color_override("font_color", Color(0.65, 0.65, 0.72))
+	_attachments_row.add_child(att_label)
+
+	_attachments_container = HBoxContainer.new()
+	_attachments_container.add_theme_constant_override("separation", 4)
+	_attachments_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_attachments_row.add_child(_attachments_container)
+
+	var clear_all_btn := Button.new()
+	clear_all_btn.text = "Clear all"
+	clear_all_btn.flat = true
+	clear_all_btn.pressed.connect(_clear_attachments)
+	_attachments_row.add_child(clear_all_btn)
+
 	# --- input row ---
 	var input_row := HBoxContainer.new()
 	input_row.add_theme_constant_override("separation", 6)
@@ -157,6 +188,20 @@ func _build_ui() -> void:
 				accept_event()
 				_on_send_pressed())
 	input_row.add_child(_input)
+
+	var attach_btn := Button.new()
+	attach_btn.text = "📎"
+	attach_btn.tooltip_text = "Attach a file or image to the next message"
+	attach_btn.custom_minimum_size = Vector2(36, 0)
+	attach_btn.pressed.connect(_on_attach_pressed)
+	input_row.add_child(attach_btn)
+
+	var shot_btn := Button.new()
+	shot_btn.text = "📷"
+	shot_btn.tooltip_text = "Attach a screenshot of the editor screen to the next message"
+	shot_btn.custom_minimum_size = Vector2(36, 0)
+	shot_btn.pressed.connect(_on_screenshot_pressed)
+	input_row.add_child(shot_btn)
 
 	_send_button = Button.new()
 	_send_button.text = "Send"
@@ -279,12 +324,30 @@ func _replay_conversation(convo) -> void:
 						_append_bubble("user", String(block.get("text", "")))
 					elif role == "assistant":
 						_append_bubble("assistant", String(block.get("text", "")))
+				"image":
+					if role == "user":
+						_append_image_bubble(block)
 				"tool_result":
-					var raw := String(block.get("content", ""))
+					var raw_content: Variant = block.get("content", "")
+					var raw_text: String = ""
+					var image_block_variant: Variant = null
+					if typeof(raw_content) == TYPE_ARRAY:
+						for inner in raw_content:
+							if typeof(inner) != TYPE_DICTIONARY:
+								continue
+							var t: String = String(inner.get("type", ""))
+							if t == "text":
+								raw_text += String(inner.get("text", ""))
+							elif t == "image" and image_block_variant == null:
+								image_block_variant = inner
+					else:
+						raw_text = String(raw_content)
 					var is_err := bool(block.get("is_error", false))
 					var tool_use_id := String(block.get("tool_use_id", ""))
 					var tool_name := String(name_by_id.get(tool_use_id, "tool"))
-					_append_tool_bubble(tool_name, not is_err, raw)
+					_append_tool_bubble(tool_name, not is_err, raw_text)
+					if image_block_variant != null:
+						_append_image_bubble(image_block_variant)
 				# tool_use blocks are elided from the replay since their tool_result
 				# already conveys what happened.
 
@@ -297,13 +360,216 @@ func _on_reset() -> void:
 
 func _on_send_pressed() -> void:
 	var text := _input.text.strip_edges()
-	if text == "":
+	if text == "" and _pending_attachments.is_empty():
 		return
 	if _agent.is_busy():
 		return
 	_input.text = ""
 	_retry_button.disabled = true
-	_agent.send_user_message(text)
+	# Snapshot attachments then clear the pending list before dispatch so a
+	# rapid follow-up click doesn't double-send them.
+	var attachments: Array = _pending_attachments.duplicate()
+	_clear_attachments()
+	_agent.send_user_message(text, attachments)
+
+
+# ---------- attachments ----------
+
+func _on_attach_pressed() -> void:
+	if _file_dialog == null or not is_instance_valid(_file_dialog):
+		_file_dialog = FileDialog.new()
+		_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		_file_dialog.filters = PackedStringArray([
+			"*.png,*.jpg,*.jpeg,*.gif,*.webp ; Images",
+			"*.gd,*.txt,*.md,*.json,*.cfg,*.tres,*.tscn,*.xml,*.yaml,*.yml,*.csv ; Text files",
+			"* ; All files",
+		])
+		_file_dialog.file_selected.connect(_on_file_selected)
+		add_child(_file_dialog)
+	_file_dialog.popup_centered_ratio(0.7)
+
+
+func _on_file_selected(path: String) -> void:
+	var lower: String = path.to_lower()
+	var is_image: bool = (
+		lower.ends_with(".png") or lower.ends_with(".jpg") or lower.ends_with(".jpeg")
+		or lower.ends_with(".gif") or lower.ends_with(".webp")
+	)
+	if is_image:
+		_attach_image_from_path(path)
+	else:
+		_attach_text_file(path)
+
+
+func _attach_image_from_path(path: String) -> void:
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		_append_bubble("error", "Cannot read %s" % path)
+		return
+	var bytes: PackedByteArray = f.get_buffer(f.get_length())
+	f.close()
+	var media: String = _guess_media_type(path)
+
+	# Decode a thumbnail for the chip preview. If decoding fails, still attach
+	# the raw bytes — the provider may accept them.
+	var thumb: Texture2D = null
+	var img := Image.new()
+	var err: int = OK
+	if media == "image/png":
+		err = img.load_png_from_buffer(bytes)
+	elif media == "image/jpeg":
+		err = img.load_jpg_from_buffer(bytes)
+	elif media == "image/webp":
+		err = img.load_webp_from_buffer(bytes)
+	else:
+		err = FAILED
+	if err == OK:
+		thumb = ImageTexture.create_from_image(img)
+
+	_pending_attachments.append({
+		"kind": "image",
+		"media_type": media,
+		"data": Marshalls.raw_to_base64(bytes),
+		"name": path.get_file(),
+		"thumbnail": thumb,
+	})
+	_refresh_attachments_ui()
+
+
+func _attach_text_file(path: String) -> void:
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		_append_bubble("error", "Cannot read %s" % path)
+		return
+	var content: String = f.get_as_text()
+	f.close()
+	# Guard against huge pastes ruining the context window.
+	var MAX_CHARS := 200_000
+	if content.length() > MAX_CHARS:
+		content = content.substr(0, MAX_CHARS) + "\n\n[truncated: file was %d chars]" % content.length()
+	_pending_attachments.append({
+		"kind": "text_file",
+		"path": path,
+		"content": content,
+		"name": path.get_file(),
+	})
+	_refresh_attachments_ui()
+
+
+func _on_screenshot_pressed() -> void:
+	var screen: int = DisplayServer.get_primary_screen()
+	var img: Image = DisplayServer.screen_get_image(screen)
+	if img == null or img.is_empty():
+		_append_bubble("error", "Screen capture failed. On macOS, grant Godot 'Screen Recording' permission in System Settings → Privacy & Security.")
+		return
+	# Downscale so we don't blow context budget.
+	var w: int = img.get_width()
+	var h: int = img.get_height()
+	var MAX_DIM := 1568
+	if maxi(w, h) > MAX_DIM:
+		var scale: float = float(MAX_DIM) / float(maxi(w, h))
+		img.resize(int(round(float(w) * scale)), int(round(float(h) * scale)), Image.INTERPOLATE_BILINEAR)
+	var bytes: PackedByteArray = img.save_png_to_buffer()
+	if bytes.is_empty():
+		_append_bubble("error", "Failed to encode screenshot as PNG.")
+		return
+	var thumb: Texture2D = ImageTexture.create_from_image(img)
+	var stamp: String = Time.get_datetime_string_from_system().replace(":", "-").replace("T", "_")
+	_pending_attachments.append({
+		"kind": "image",
+		"media_type": "image/png",
+		"data": Marshalls.raw_to_base64(bytes),
+		"name": "editor_%s.png" % stamp,
+		"thumbnail": thumb,
+	})
+	_refresh_attachments_ui()
+
+
+func _clear_attachments() -> void:
+	_pending_attachments.clear()
+	_refresh_attachments_ui()
+
+
+func _remove_attachment(index: int) -> void:
+	if index < 0 or index >= _pending_attachments.size():
+		return
+	_pending_attachments.remove_at(index)
+	_refresh_attachments_ui()
+
+
+func _refresh_attachments_ui() -> void:
+	if _attachments_container == null:
+		return
+	for child in _attachments_container.get_children():
+		child.queue_free()
+	_attachments_row.visible = not _pending_attachments.is_empty()
+	for i in _pending_attachments.size():
+		var att: Dictionary = _pending_attachments[i]
+		_attachments_container.add_child(_make_attachment_chip(att, i))
+
+
+func _make_attachment_chip(att: Dictionary, index: int) -> Control:
+	var panel := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.20, 0.22, 0.28)
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.content_margin_left = 6
+	style.content_margin_right = 4
+	style.content_margin_top = 3
+	style.content_margin_bottom = 3
+	panel.add_theme_stylebox_override("panel", style)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	panel.add_child(row)
+
+	var kind: String = String(att.get("kind", ""))
+	if kind == "image":
+		var thumb_variant: Variant = att.get("thumbnail", null)
+		if thumb_variant is Texture2D:
+			var tex: Texture2D = thumb_variant
+			var tr := TextureRect.new()
+			tr.texture = tex
+			tr.custom_minimum_size = Vector2(24, 24)
+			tr.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+			tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			row.add_child(tr)
+		else:
+			var icon_label := Label.new()
+			icon_label.text = "🖼"
+			row.add_child(icon_label)
+	else:
+		var icon_label := Label.new()
+		icon_label.text = "📄"
+		row.add_child(icon_label)
+
+	var name_label := Label.new()
+	name_label.text = String(att.get("name", "attachment"))
+	name_label.add_theme_font_size_override("font_size", 11)
+	row.add_child(name_label)
+
+	var remove_btn := Button.new()
+	remove_btn.text = "✕"
+	remove_btn.flat = true
+	remove_btn.tooltip_text = "Remove attachment"
+	remove_btn.focus_mode = Control.FOCUS_NONE
+	remove_btn.pressed.connect(_remove_attachment.bind(index))
+	row.add_child(remove_btn)
+
+	return panel
+
+
+static func _guess_media_type(path: String) -> String:
+	var lower: String = path.to_lower()
+	if lower.ends_with(".png"): return "image/png"
+	if lower.ends_with(".jpg") or lower.ends_with(".jpeg"): return "image/jpeg"
+	if lower.ends_with(".gif"): return "image/gif"
+	if lower.ends_with(".webp"): return "image/webp"
+	return "image/png"
 
 
 # ---------- agent signals ----------
@@ -321,7 +587,19 @@ func _on_tool_started(tool_name: String, input: Dictionary) -> void:
 
 func _on_tool_finished(tool_name: String, result: Dictionary) -> void:
 	var ok := bool(result.get("ok", true))
-	_append_tool_bubble(tool_name, ok, JSON.stringify(result))
+	# Show text portion of the tool result. Strip image_content from the JSON
+	# blob so we don't dump a huge base64 string into a chat bubble.
+	var display_result: Dictionary = result.duplicate(true)
+	var image_content: Variant = display_result.get("image_content", null)
+	if typeof(image_content) == TYPE_DICTIONARY:
+		display_result.erase("image_content")
+	_append_tool_bubble(tool_name, ok, JSON.stringify(display_result))
+	if typeof(image_content) == TYPE_DICTIONARY:
+		_append_image_bubble({
+			"media_type": String(image_content.get("media_type", "image/png")),
+			"data": String(image_content.get("data", "")),
+			"name": "%s result" % tool_name,
+		})
 	_set_status("processing", "thinking...")
 	_refresh_token_label()
 
@@ -415,6 +693,46 @@ func _append_bubble(role: String, text: String) -> void:
 
 	var use_markdown := role == "assistant"
 	vb.add_child(_make_body_label(text, use_markdown))
+
+	_messages_container.add_child(panel)
+	call_deferred("_scroll_to_bottom")
+
+
+func _append_image_bubble(block: Dictionary) -> void:
+	# Decode the base64 payload into a Texture2D. If it fails (unknown media,
+	# corrupt data), show a text placeholder instead of crashing the UI.
+	var media: String = String(block.get("media_type", "image/png"))
+	var b64: String = String(block.get("data", ""))
+	var name_hint: String = String(block.get("name", ""))
+	var bytes: PackedByteArray = Marshalls.base64_to_raw(b64)
+	var img := Image.new()
+	var err: int = FAILED
+	if media == "image/png":
+		err = img.load_png_from_buffer(bytes)
+	elif media == "image/jpeg":
+		err = img.load_jpg_from_buffer(bytes)
+	elif media == "image/webp":
+		err = img.load_webp_from_buffer(bytes)
+
+	var panel := _make_bubble_panel("tool")
+	var vb := _bubble_vbox(panel)
+	var label := Label.new()
+	label.text = "🖼 %s" % (name_hint if name_hint != "" else "image")
+	label.add_theme_font_size_override("font_size", 10)
+	label.add_theme_color_override("font_color", Color(0.7, 0.8, 0.7))
+	vb.add_child(label)
+
+	if err == OK:
+		var tex: Texture2D = ImageTexture.create_from_image(img)
+		var tr := TextureRect.new()
+		tr.texture = tex
+		tr.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+		tr.custom_minimum_size = Vector2(0, min(300, img.get_height()))
+		vb.add_child(tr)
+	else:
+		var body := _make_body_label("[image: %d bytes, %s]" % [bytes.size(), media], false)
+		vb.add_child(body)
 
 	_messages_container.add_child(panel)
 	call_deferred("_scroll_to_bottom")

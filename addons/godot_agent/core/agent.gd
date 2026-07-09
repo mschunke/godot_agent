@@ -45,14 +45,17 @@ func is_busy() -> bool:
 	return _busy
 
 
-func send_user_message(text: String) -> void:
+func send_user_message(text: String, attachments: Array = []) -> void:
 	if _busy:
 		logger.warn("agent busy, ignoring message")
 		return
-	if text.strip_edges() == "":
+	if text.strip_edges() == "" and attachments.is_empty():
 		return
 
-	conversation.add_user_text(text)
+	if attachments.is_empty():
+		conversation.add_user_text(text)
+	else:
+		conversation.add_user_message(text, attachments)
 	message_appended.emit("user", text)
 	await _run_loop()
 
@@ -123,13 +126,23 @@ func _run_loop() -> void:
 			var tool_result: Dictionary = await ToolRegistry.dispatch(parent_node, call.name, call.input)
 			tool_finished.emit(call.name, tool_result)
 
-			var content_str: String = JSON.stringify(tool_result)
+			# If the tool produced an inline image (e.g. screenshot_game), lift
+			# it into the tool_result so the model can actually see the pixels.
+			# The rest of the dict is serialised to JSON for the textual content.
+			var display_result: Dictionary = tool_result.duplicate(true)
+			var image_content: Variant = display_result.get("image_content", null)
+			if typeof(image_content) == TYPE_DICTIONARY:
+				display_result.erase("image_content")
+			var content_str: String = JSON.stringify(display_result)
 			var is_err := not bool(tool_result.get("ok", true))
-			results.append({
+			var result_entry: Dictionary = {
 				"tool_use_id": call.id,
 				"content": content_str,
 				"is_error": is_err,
-			})
+			}
+			if typeof(image_content) == TYPE_DICTIONARY:
+				result_entry["image_content"] = image_content
+			results.append(result_entry)
 
 		# Feed tool results back as a canonical user message; each provider converts.
 		conversation.add_tool_results(results)

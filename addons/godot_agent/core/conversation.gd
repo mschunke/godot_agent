@@ -65,6 +65,55 @@ func add_user_text(text: String) -> void:
 	changed.emit()
 
 
+func add_user_message(text: String, attachments: Array) -> void:
+	# Like add_user_text but supports attachments produced by the UI.
+	# Attachment shapes:
+	#   {kind: "image", media_type: "image/png", data: "<base64>", name?: "..."}
+	#     → canonical image block
+	#   {kind: "text_file", path: "res://...", content: "..."}
+	#     → prepended to the text as a fenced code block with a header
+	var body_text: String = text
+	var image_blocks: Array = []
+	for att_variant in attachments:
+		if typeof(att_variant) != TYPE_DICTIONARY:
+			continue
+		var att: Dictionary = att_variant
+		var kind: String = String(att.get("kind", ""))
+		if kind == "image":
+			var block: Dictionary = {
+				"type": "image",
+				"media_type": String(att.get("media_type", "image/png")),
+				"data": String(att.get("data", "")),
+			}
+			var att_name: String = String(att.get("name", ""))
+			if att_name != "":
+				block["name"] = att_name
+			image_blocks.append(block)
+		elif kind == "text_file":
+			var header: String = "[Attached file: %s]" % String(att.get("path", ""))
+			var content_str: String = String(att.get("content", ""))
+			var chunk: String = "\n\n%s\n```\n%s\n```" % [header, content_str]
+			if body_text == "":
+				body_text = header + "\n```\n" + content_str + "\n```"
+			else:
+				body_text += chunk
+
+	var content: Array = []
+	if body_text != "":
+		content.append({"type": "text", "text": body_text})
+	for b in image_blocks:
+		content.append(b)
+	if content.is_empty():
+		return
+
+	_messages.append({"role": "user", "content": content})
+	_touch()
+	if title == "New chat":
+		var seed_text: String = body_text if body_text != "" else "(attachment)"
+		title = _derive_title(seed_text)
+	changed.emit()
+
+
 func add_assistant(content: Array, provider: String = "", model: String = "") -> void:
 	var msg: Dictionary = {
 		"role": "assistant",
@@ -82,12 +131,32 @@ func add_assistant(content: Array, provider: String = "", model: String = "") ->
 func add_tool_results(results: Array) -> void:
 	var parts: Array = []
 	for r in results:
-		parts.append({
+		# Support two content shapes:
+		#   1) plain string (existing) — {content: "..."}
+		#   2) rich content — {content: "...", image_content: {media_type, data}}
+		#      For rich results we emit an array of blocks: [{text}, {image}].
+		#      Providers convert as appropriate; Anthropic accepts this shape
+		#      natively, OpenAI/Gemini get a follow-up image part.
+		var block: Dictionary = {
 			"type": "tool_result",
 			"tool_use_id": r.get("tool_use_id", ""),
-			"content": r.get("content", ""),
 			"is_error": r.get("is_error", false),
-		})
+		}
+		var image: Variant = r.get("image_content", null)
+		if typeof(image) == TYPE_DICTIONARY and String(image.get("data", "")) != "":
+			var text_str: String = String(r.get("content", ""))
+			var content_arr: Array = []
+			if text_str != "":
+				content_arr.append({"type": "text", "text": text_str})
+			content_arr.append({
+				"type": "image",
+				"media_type": String(image.get("media_type", "image/png")),
+				"data": String(image.get("data", "")),
+			})
+			block["content"] = content_arr
+		else:
+			block["content"] = r.get("content", "")
+		parts.append(block)
 	_messages.append({
 		"role": "user",
 		"content": parts,

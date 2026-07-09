@@ -105,27 +105,67 @@ func _convert_messages(system: String, messages: Array) -> Array:
 		if m.role == "assistant":
 			out.append(_convert_assistant(m.content))
 		elif m.role == "user":
-			# Split each canonical user message: text becomes a user msg, tool_results
-			# become individual role=tool messages.
-			var text := ""
+			# Split each canonical user message: text + image blocks become a
+			# user message with a content-parts array; tool_results become
+			# individual role=tool messages.
+			var user_parts: Array = []  # [{type:"text"|"image_url", ...}]
 			var tool_msgs: Array = []
 			if typeof(m.content) == TYPE_ARRAY:
 				for block in m.content:
 					if block.type == "text":
-						text += String(block.get("text", ""))
+						user_parts.append({"type": "text", "text": String(block.get("text", ""))})
+					elif block.type == "image":
+						user_parts.append(_to_openai_image_part(block))
 					elif block.type == "tool_result":
-						tool_msgs.append({
-							"role": "tool",
-							"tool_call_id": block.tool_use_id,
-							"content": String(block.content),
-						})
+						tool_msgs.append(_convert_tool_result(block))
 			elif typeof(m.content) == TYPE_STRING:
-				text = m.content
-			if text != "":
-				out.append({"role": "user", "content": text})
+				user_parts.append({"type": "text", "text": String(m.content)})
+			if not user_parts.is_empty():
+				# OpenAI accepts a plain string when there's only text; otherwise
+				# a parts array. Collapse the single-text case for compatibility.
+				if user_parts.size() == 1 and user_parts[0].get("type", "") == "text":
+					out.append({"role": "user", "content": String(user_parts[0].get("text", ""))})
+				else:
+					out.append({"role": "user", "content": user_parts})
 			for tm in tool_msgs:
 				out.append(tm)
 	return out
+
+
+static func _to_openai_image_part(block: Dictionary) -> Dictionary:
+	var media: String = String(block.get("media_type", "image/png"))
+	var data: String = String(block.get("data", ""))
+	return {
+		"type": "image_url",
+		"image_url": {"url": "data:%s;base64,%s" % [media, data]},
+	}
+
+
+static func _convert_tool_result(block: Dictionary) -> Dictionary:
+	# OpenAI tool messages: {role:"tool", tool_call_id, content}. Content may
+	# be a string OR (on gpt-4o and newer vision-capable models) a parts array
+	# with text + image_url entries.
+	var content_val: Variant = block.get("content", "")
+	if typeof(content_val) == TYPE_ARRAY:
+		var parts: Array = []
+		for inner in content_val:
+			if typeof(inner) != TYPE_DICTIONARY:
+				continue
+			var t: String = String(inner.get("type", ""))
+			if t == "text":
+				parts.append({"type": "text", "text": String(inner.get("text", ""))})
+			elif t == "image":
+				parts.append(_to_openai_image_part(inner))
+		return {
+			"role": "tool",
+			"tool_call_id": block.tool_use_id,
+			"content": parts,
+		}
+	return {
+		"role": "tool",
+		"tool_call_id": block.tool_use_id,
+		"content": String(content_val),
+	}
 
 
 func _convert_assistant(content: Variant) -> Dictionary:

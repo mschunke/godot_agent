@@ -89,13 +89,60 @@ func _convert_tools(tools: Array) -> Array:
 
 
 func _convert_messages(messages: Array) -> Array:
-	# Canonical == Anthropic-style already. Pass through, dropping any system messages.
+	# Canonical is Anthropic-shaped for text/tool_use/tool_result already, but
+	# canonical image blocks are stored flat as {type:"image", media_type, data}
+	# while Anthropic expects {type:"image", source:{type:"base64", media_type, data}}.
+	# Rewrite images in user message content and inside tool_result content arrays.
 	var out: Array = []
 	for m in messages:
 		if m.role == "system":
 			continue
-		out.append({"role": m.role, "content": m.content})
+		var content_variant: Variant = m.content
+		if typeof(content_variant) != TYPE_ARRAY:
+			out.append({"role": m.role, "content": content_variant})
+			continue
+		var converted: Array = []
+		for block_variant in content_variant:
+			if typeof(block_variant) != TYPE_DICTIONARY:
+				converted.append(block_variant)
+				continue
+			var block: Dictionary = block_variant
+			converted.append(_convert_block(block))
+		out.append({"role": m.role, "content": converted})
 	return out
+
+
+func _convert_block(block: Dictionary) -> Variant:
+	var t: String = String(block.get("type", ""))
+	if t == "image":
+		return _to_anthropic_image(block)
+	if t == "tool_result":
+		var content_val: Variant = block.get("content", "")
+		if typeof(content_val) == TYPE_ARRAY:
+			var arr: Array = []
+			for inner in content_val:
+				if typeof(inner) == TYPE_DICTIONARY:
+					arr.append(_convert_block(inner))
+				else:
+					arr.append(inner)
+			var out_block: Dictionary = block.duplicate(true)
+			out_block["content"] = arr
+			return out_block
+	return block
+
+
+static func _to_anthropic_image(block: Dictionary) -> Dictionary:
+	# Already Anthropic-shaped? Pass through.
+	if block.has("source"):
+		return block
+	return {
+		"type": "image",
+		"source": {
+			"type": "base64",
+			"media_type": String(block.get("media_type", "image/png")),
+			"data": String(block.get("data", "")),
+		},
+	}
 
 
 func _normalize_stop(reason: String) -> String:

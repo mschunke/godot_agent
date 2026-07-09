@@ -265,6 +265,47 @@ static func all() -> Array:
 			"parameters": {"type": "object", "properties": {}},
 		},
 		{
+			"name": "screenshot_game",
+			"description": "Capture a PNG screenshot from the running game (or the current screen if the editor uses windowed play). Attaches the image directly to the tool result so you can see it. Saves a copy under user://godot_agent_screenshots/. Optionally provide a screen index (defaults to the primary screen).",
+			"destructive": false,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"screen": {"type": "integer", "description": "Screen index to capture. -1 = primary screen.", "default": -1},
+					"save_path": {"type": "string", "description": "Optional res:// or user:// path to save the PNG. Defaults to a timestamped file under user://godot_agent_screenshots/."},
+				},
+			},
+		},
+		{
+			"name": "send_input",
+			"description": "Synthesize keyboard/mouse input at the OS level so the running game receives it. Actions run in order. Types: 'key' (keyname like 'space', 'enter', 'a', 'left'), 'text' (types a string), 'mouse_click' (button: 'left'|'right'|'middle'; optional x/y in screen coords), 'wait_ms' (delay). Platform support: macOS (built-in osascript), Linux X11 (requires xdotool), Windows (PowerShell). Focus the game window first with `run_project` or manually.",
+			"destructive": false,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"actions": {
+						"type": "array",
+						"description": "Ordered list of input actions to perform.",
+						"items": {
+							"type": "object",
+							"properties": {
+								"type": {"type": "string", "enum": ["key", "text", "mouse_click", "wait_ms"]},
+								"key": {"type": "string", "description": "For type=key. e.g. 'space', 'enter', 'esc', 'a', 'left', 'up', 'f1'."},
+								"modifiers": {"type": "array", "items": {"type": "string"}, "description": "Optional modifiers: 'shift', 'ctrl', 'alt', 'cmd'."},
+								"text": {"type": "string", "description": "For type=text."},
+								"button": {"type": "string", "description": "For type=mouse_click. 'left'|'right'|'middle'.", "default": "left"},
+								"x": {"type": "integer", "description": "For type=mouse_click. Screen X coord. Omit to click at current cursor."},
+								"y": {"type": "integer", "description": "For type=mouse_click. Screen Y coord."},
+								"ms": {"type": "integer", "description": "For type=wait_ms. Milliseconds to wait.", "default": 100},
+							},
+							"required": ["type"],
+						},
+					},
+				},
+				"required": ["actions"],
+			},
+		},
+		{
 			"name": "get_class_docs",
 			"description": "Return the list of properties, methods and signals of a Godot class via ClassDB. Use to look up any API before writing code.",
 			"destructive": false,
